@@ -87,10 +87,17 @@ No OpenAI. No Anthropic API. No paid tiers.
 
 **Deployment**
 - Dev source: local only, no GitHub remote
-- Deploy copy: `Desktop\code\ai-earth-observation-feedback\` â†’ https://github.com/ebrahim8332/ai-earth-observation
-- Live URL: https://eoil-explorer.streamlit.app
+- Deploy copy: feedback folder -> https://github.com/ebrahim8332/ai-earth-observation
+- Live URL: https://eoil-explorer.streamlit.app (single portal, all modules)
 - Google Colab: used for heavy model inference (foundation models)
 - Key: deploy .streamlit/config.toml must have headless=true
+
+**App architecture: single portal**
+All modules live inside one Streamlit app with sidebar navigation.
+One URL, one deployment, one experience for users and clients.
+Each module has its own files inside apps/01_eo_explorer/.
+The main app.py routes between modules via the sidebar.
+New modules are added per day as new files. The core app does not change.
 
 ---
 

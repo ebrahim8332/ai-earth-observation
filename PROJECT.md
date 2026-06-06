@@ -38,17 +38,20 @@
 
 Update this section as each app goes live.
 
-| App | Day | URL |
-|-----|-----|-----|
-| EO Explorer v1.1 | 1-3 | https://eoil-explorer.streamlit.app |
-| EO Time Series Explorer | 6 | _add after deployment_ |
-| EO Explorer v1.2 | 7 | _add after deployment_ |
-| Change Detection Dashboard | 9 | _add after deployment_ |
-| AI Imagery Interpreter | 10 | _add after deployment_ |
-| EO Conversational Assistant | 13 | _add after deployment_ |
-| Environmental Intelligence Dashboard | 15 | _add after deployment_ |
-| Atmospheric Intelligence Dashboard | 17 | _add after deployment_ |
-| Multi-Layer Geospatial Dashboard | 20 | _add after deployment_ |
+All modules are deployed as one portal app at https://eoil-explorer.streamlit.app
+Sidebar navigation routes between modules. One URL for everything.
+
+| Module | Added Day | Status |
+|--------|-----------|--------|
+| EO Explorer | 1-3 | Live |
+| GEE Time Series Explorer | 6 | Planned |
+| EO Explorer v1.2 (drone) | 7 | Planned |
+| Change Detection | 9 | Planned |
+| AI Imagery Interpreter | 10 | Planned |
+| EO Conversational Assistant | 13 | Planned |
+| Environmental Intelligence | 15 | Planned |
+| Atmospheric Intelligence | 17 | Planned |
+| Multi-Layer Geospatial | 20 | Planned |
 | EO Decision Support Platform | 24 | _add after deployment_ |
 | EO Vendor Evaluator | 26 | _add after deployment_ |
 | EOIL Curriculum Index | 28 | _add after deployment_ |
