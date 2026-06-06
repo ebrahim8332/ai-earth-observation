@@ -1,12 +1,1 @@
 streamlit
-streamlit-folium
-folium
-numpy
-plotly
-pillow
-requests
-python-dotenv
-pystac-client
-planetary-computer
-groq
-google-genai
