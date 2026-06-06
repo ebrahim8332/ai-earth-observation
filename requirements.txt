@@ -1,15 +1,12 @@
-# EO Explorer v1.1 — Streamlit Cloud deployment requirements
-# Only packages actually imported by the app are listed here.
-
-streamlit>=1.35.0
-streamlit-folium>=0.20.0
-folium>=0.16.0
-numpy>=1.26.0
-plotly>=5.20.0
-pillow>=10.0.0
-requests>=2.31.0
-python-dotenv>=1.0.0
-pystac-client>=0.7.0
-planetary-computer>=1.0.0
-groq>=0.9.0
-google-genai>=1.0.0
+streamlit
+streamlit-folium
+folium
+numpy
+plotly
+pillow
+requests
+python-dotenv
+pystac-client
+planetary-computer
+groq
+google-genai
