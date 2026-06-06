@@ -66,7 +66,7 @@ Update this section as each notebook is committed.
 |----------|-----|--------|
 | 01_stac_query_demo.ipynb | 2 | pending |
 | 02_gee_ndvi_timeseries.ipynb | 4 | complete |
-| 03_sentinel1_sar_basics.ipynb | 5 | pending |
+| 03_sentinel1_sar_basics.ipynb | 5 | complete |
 | 04_land_cover_classification.ipynb | 8 | pending |
 | 05_sam_segmentation_demo.ipynb | 11 | pending |
 | 06_prithvi_foundation_model.ipynb | 12 | pending |
@@ -112,7 +112,7 @@ Update the checkbox and add a one-line note after each day is complete.
 - [ ] Day 2: STAC and cloud-native data notebook
 - [ ] Day 3: EO Explorer v1.1 with spectral index module
 - [x] Day 4: GEE NDVI time series notebook — Sahel 10-year NDVI, 253 data points, trend +0.0034/year
-- [ ] Day 5: Sentinel-1 SAR basics notebook
+- [x] Day 5: Sentinel-1 SAR basics notebook — Rotterdam port, VV/VH/false color, backscatter change map
 - [ ] Day 6: EO Explorer v1.2 with drone imagery module
 - [ ] Day 7: Week 1 review and team primer document
 

@@ -129,3 +129,40 @@ recent period, NDVI difference). Groq AI interpretation with substantive fallbac
 a round trip to Google's servers. Use it sparingly — one call to get the full time series
 is better than calling it inside a loop for each image. That would be 253 separate
 network requests instead of one.
+
+---
+
+## Day 5: Sentinel-1 SAR Basics
+
+**What was built:** Jupyter notebook `notebooks/03_sentinel1_sar_basics.ipynb`. Sentinel-1
+GRD analysis over the Port of Rotterdam using GEE. VV band map, VH band map, false color
+composite (VV/VH/ratio), two-date comparison, backscatter change map, Groq interpretation.
+Confirmed water at -24 dB, ships pushing VV max to +29.9 dB.
+
+**Key concepts:**
+
+- **SAR (Synthetic Aperture Radar)** transmits its own microwave pulses and records the
+  return. It works through clouds and at night. Optical sensors need sunlight and clear skies.
+  SAR does not. This is the defining advantage for flood mapping, ship detection, and
+  monitoring in cloudy tropical regions.
+- **Backscatter** is the intensity of the radar signal that returns to the sensor. Measured
+  in dB (decibels), a logarithmic scale. Every 3 dB increase = double the energy returned.
+- **Specular reflection** is what calm water does to radar. It acts like a mirror and
+  bounces the pulse away from the sensor. Result: water appears very dark (-20 to -25 dB).
+- **Corner reflector** is what ships and buildings do. Right-angle metal surfaces bounce
+  energy directly back. Result: ships appear as very bright point targets (up to +30 dB).
+- **VV polarization** (vertical transmit, vertical receive) responds to surface roughness
+  and vertical structures. Strong for urban areas, ports, and open water contrast.
+- **VH polarization** (vertical transmit, horizontal receive) responds to volume scattering.
+  Strong for vegetation canopy, forest, and complex 3D structures.
+- **False color composite** stacks VV, VH, and VV/VH ratio into RGB channels. Each channel
+  highlights a different surface type. One image reveals water, vegetation, and urban areas
+  simultaneously.
+- **GRD (Ground Range Detected)** means the raw radar data has been processed into
+  ground-projected intensity values. It is the standard ready-to-use Sentinel-1 product.
+  The alternative (SLC — Single Look Complex) retains phase information for interferometry.
+
+**What to remember:** Both SAR dates over Rotterdam were acquired in winter when cloud
+cover exceeds 80%. An optical sensor would show nothing but white cloud on those days.
+This is not a hypothetical advantage — it is why SAR is the primary sensor for maritime
+monitoring, disaster response, and tropical agriculture.
