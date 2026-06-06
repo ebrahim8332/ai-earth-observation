@@ -1,0 +1,12 @@
+[server]
+# Keep the server alive even when the browser tab is idle
+headless = false
+runOnSave = false
+maxUploadSize = 200
+
+[browser]
+# Do not send usage stats to Streamlit
+gatherUsageStats = false
+
+[runner]
+fastReruns = true
