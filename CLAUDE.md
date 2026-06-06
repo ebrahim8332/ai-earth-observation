@@ -1,4 +1,4 @@
-# CLAUDE.md
+﻿# CLAUDE.md
 # AI-Native Earth Observation Innovation Lab (EOIL)
 # Permanent project context for Claude Code and Codex
 # Read this file at the start of every session before doing anything
@@ -87,8 +87,8 @@ No OpenAI. No Anthropic API. No paid tiers.
 
 **Deployment**
 - Dev source: local only, no GitHub remote
-- Deploy copy: `Desktop\code\ai-earth-observation-feedback\` → https://github.com/ebrahim8332/ai-earth-observation
-- Live URL: https://ai-earth-observation.streamlit.app
+- Deploy copy: `Desktop\code\ai-earth-observation-feedback\` â†’ https://github.com/ebrahim8332/ai-earth-observation
+- Live URL: https://eoil-explorer.streamlit.app
 - Google Colab: used for heavy model inference (foundation models)
 - Key: deploy .streamlit/config.toml must have headless=true
 
@@ -97,47 +97,47 @@ No OpenAI. No Anthropic API. No paid tiers.
 ## Repository Structure
 
 earth-observation-innovation-lab/
-├── CLAUDE.md                    ← this file, always read first
-├── PROJECT.md                   ← current status and next steps
-├── README.md
-├── requirements.txt
-├── .gitignore
-├── .env.example
-│
-├── apps/
-│   ├── 01_eo_explorer/          ← Day 1-6: foundational app, versioned
-│   ├── 02_change_detection/     ← Day 9
-│   ├── 03_ai_imagery/           ← Day 10
-│   ├── 04_eo_assistant/         ← Day 13
-│   ├── 05_environmental/        ← Day 15
-│   ├── 06_atmospheric/          ← Day 17
-│   ├── 07_multimap/             ← Day 20
-│   ├── 08_decision_support/     ← Days 22-24
-│   ├── 09_vendor_evaluator/     ← Days 25-26
-│   └── 10_curriculum_index/     ← Days 27-28
-│
-├── notebooks/
-│   ├── 01_stac_query_demo.ipynb
-│   ├── 02_gee_ndvi_timeseries.ipynb
-│   ├── 03_sentinel1_sar_basics.ipynb
-│   ├── 04_land_cover_classification.ipynb
-│   ├── 05_sam_segmentation_demo.ipynb
-│   ├── 06_prithvi_foundation_model.ipynb
-│   ├── 07_sar_infrastructure_monitoring.ipynb
-│   ├── 08_lidar_intelligence.ipynb
-│   └── 09_emit_hyperspectral.ipynb
-│
-├── docs/
-│   ├── build_specs/             ← one build spec per app
-│   └── learning_notes/          ← one notes file per day
-│
-├── prompts/
-│   ├── claude_code_prompts.md   ← all build prompts used, archived
-│   └── ai_explanation_prompts.md← reusable AI assistant prompts
-│
-├── architecture/                ← one diagram per app
-└── datasets/
-    └── sample/                  ← sample GeoJSON and static data
+â”œâ”€â”€ CLAUDE.md                    â† this file, always read first
+â”œâ”€â”€ PROJECT.md                   â† current status and next steps
+â”œâ”€â”€ README.md
+â”œâ”€â”€ requirements.txt
+â”œâ”€â”€ .gitignore
+â”œâ”€â”€ .env.example
+â”‚
+â”œâ”€â”€ apps/
+â”‚   â”œâ”€â”€ 01_eo_explorer/          â† Day 1-6: foundational app, versioned
+â”‚   â”œâ”€â”€ 02_change_detection/     â† Day 9
+â”‚   â”œâ”€â”€ 03_ai_imagery/           â† Day 10
+â”‚   â”œâ”€â”€ 04_eo_assistant/         â† Day 13
+â”‚   â”œâ”€â”€ 05_environmental/        â† Day 15
+â”‚   â”œâ”€â”€ 06_atmospheric/          â† Day 17
+â”‚   â”œâ”€â”€ 07_multimap/             â† Day 20
+â”‚   â”œâ”€â”€ 08_decision_support/     â† Days 22-24
+â”‚   â”œâ”€â”€ 09_vendor_evaluator/     â† Days 25-26
+â”‚   â””â”€â”€ 10_curriculum_index/     â† Days 27-28
+â”‚
+â”œâ”€â”€ notebooks/
+â”‚   â”œâ”€â”€ 01_stac_query_demo.ipynb
+â”‚   â”œâ”€â”€ 02_gee_ndvi_timeseries.ipynb
+â”‚   â”œâ”€â”€ 03_sentinel1_sar_basics.ipynb
+â”‚   â”œâ”€â”€ 04_land_cover_classification.ipynb
+â”‚   â”œâ”€â”€ 05_sam_segmentation_demo.ipynb
+â”‚   â”œâ”€â”€ 06_prithvi_foundation_model.ipynb
+â”‚   â”œâ”€â”€ 07_sar_infrastructure_monitoring.ipynb
+â”‚   â”œâ”€â”€ 08_lidar_intelligence.ipynb
+â”‚   â””â”€â”€ 09_emit_hyperspectral.ipynb
+â”‚
+â”œâ”€â”€ docs/
+â”‚   â”œâ”€â”€ build_specs/             â† one build spec per app
+â”‚   â””â”€â”€ learning_notes/          â† one notes file per day
+â”‚
+â”œâ”€â”€ prompts/
+â”‚   â”œâ”€â”€ claude_code_prompts.md   â† all build prompts used, archived
+â”‚   â””â”€â”€ ai_explanation_prompts.mdâ† reusable AI assistant prompts
+â”‚
+â”œâ”€â”€ architecture/                â† one diagram per app
+â””â”€â”€ datasets/
+    â””â”€â”€ sample/                  â† sample GeoJSON and static data
 
 ---
 

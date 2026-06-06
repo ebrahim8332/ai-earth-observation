@@ -1,4 +1,4 @@
-# PROJECT.md
+﻿# PROJECT.md
 # AI-Native Earth Observation Innovation Lab
 # Current status and next steps
 # Update this file at the end of every session
@@ -40,7 +40,7 @@ Update this section as each app goes live.
 
 | App | Day | URL |
 |-----|-----|-----|
-| EO Explorer v1.1 | 1-3 | https://ai-earth-observation.streamlit.app |
+| EO Explorer v1.1 | 1-3 | https://eoil-explorer.streamlit.app |
 | EO Explorer v1.2 | 6 | _add after deployment_ |
 | Change Detection Dashboard | 9 | _add after deployment_ |
 | AI Imagery Interpreter | 10 | _add after deployment_ |

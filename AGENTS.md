@@ -1,4 +1,4 @@
-# AGENTS.md — AI Earth Observation Lab
+﻿# AGENTS.md â€” AI Earth Observation Lab
 
 This file applies to all work in this project when using OpenAI Codex or any other AI coding agent.
 
@@ -14,12 +14,12 @@ Multi-app platform for AI-native geospatial analysis. Each folder in `apps/` is 
 
 ```
 ai-earth-observation/
-├── apps/           One subfolder per app. Self-contained.
-├── notebooks/      Exploratory analysis and data tests.
-├── docs/           Build specs per app.
-├── prompts/        Reusable AI prompt templates.
-├── architecture/   System diagrams and design decisions.
-├── datasets/       Sample data for offline testing.
+â”œâ”€â”€ apps/           One subfolder per app. Self-contained.
+â”œâ”€â”€ notebooks/      Exploratory analysis and data tests.
+â”œâ”€â”€ docs/           Build specs per app.
+â”œâ”€â”€ prompts/        Reusable AI prompt templates.
+â”œâ”€â”€ architecture/   System diagrams and design decisions.
+â”œâ”€â”€ datasets/       Sample data for offline testing.
 ```
 
 ---
@@ -39,14 +39,14 @@ ai-earth-observation/
 ## Deployment
 
 This is the dev source folder. Do not push this folder to GitHub.
-Deploy copy: `Desktop\code\ai-earth-observation-feedback\` → https://github.com/ebrahim8332/ai-earth-observation
-Live URL: https://ai-earth-observation.streamlit.app
+Deploy copy: `Desktop\code\ai-earth-observation-feedback\` â†’ https://github.com/ebrahim8332/ai-earth-observation
+Live URL: https://eoil-explorer.streamlit.app
 
 ---
 
 ## Current App
 
-`apps/01_eo_explorer/` — EO Explorer v1.1. Days 1-3. Live.
+`apps/01_eo_explorer/` â€” EO Explorer v1.1. Days 1-3. Live.
 
 ---
 
