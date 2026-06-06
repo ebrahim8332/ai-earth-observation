@@ -52,6 +52,13 @@ data. Every app should answer a real question.
 **Graceful degradation.** Every app must work with no API key present.
 Fallback responses must be substantive, not placeholder text.
 
+**Notebook first, app second.**
+Every analytical feature is built as a Jupyter notebook before it becomes an interactive app.
+The notebook lets you run code cell by cell, see raw outputs, and understand what is happening
+under the hood. The app is the polished, interactive version of the same logic.
+This dual approach applies to every module in the program.
+Notebook days are for learning the mechanics. App days are for making the mechanics usable.
+
 **Zero budget.** Every data source, API, library, and platform must be free.
 No OpenAI. No Anthropic API. No paid tiers.
 

@@ -24,6 +24,21 @@ ai-earth-observation/
 
 ---
 
+## Build Approach: Notebook First, App Second
+
+Every analytical feature follows this two-step sequence:
+1. Build a Jupyter notebook first. Run it cell by cell. Understand the raw mechanics.
+2. Build the interactive app module second. The app is the polished version of the notebook logic.
+
+This applies to every module in the program. Notebook days are for learning.
+App days are for making that learning usable and deployable.
+
+The notebook stays in 
+otebooks/ as a permanent reference.
+The app module lives in pps/01_eo_explorer/ as part of the single portal.
+
+---
+
 ## Conventions
 
 - Language: Python 3.12
@@ -44,7 +59,7 @@ Live URL: https://eoil-explorer.streamlit.app
 
 ---
 
-## Current App
+## Current State
 
 `apps/01_eo_explorer/` â€” EO Explorer v1.1. Days 1-3. Live.
 
