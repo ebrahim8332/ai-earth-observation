@@ -504,3 +504,4 @@ At the start of every Claude Code session:
 - When a session is complete, tell me exactly what was built, what the
   commit message was, and what the next session will cover.
 - Keep responses direct. No filler. No motivational language.
+
