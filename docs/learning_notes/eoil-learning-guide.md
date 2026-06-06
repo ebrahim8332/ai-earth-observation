@@ -87,3 +87,45 @@ satellite_catalog.py, geocoder.py.
 **What to remember:** The deploy config.toml must have `headless = true` for Streamlit
 Cloud. `headless = false` is correct for local development. Two separate config files,
 one per environment.
+
+---
+
+## Day 4: GEE NDVI Time Series
+
+**What was built:** Jupyter notebook `notebooks/02_gee_ndvi_timeseries.ipynb`. 10-year
+NDVI time series for the Sahel region of West Africa using MODIS MOD13Q1 via Google Earth
+Engine. 253 data points at 16-day intervals from 2014-2024. Three charts: time series with
+trend line, seasonal cycle bar chart, and three interactive geemap maps (early period,
+recent period, NDVI difference). Groq AI interpretation with substantive fallback.
+
+**Key concepts:**
+
+- **Google Earth Engine (GEE)** is Google's cloud platform for planetary-scale geospatial
+  analysis. You write Python code locally but all computation runs on Google's servers.
+  You never download the full dataset — you ask GEE to compute results and return only
+  what you need.
+- **ee.ImageCollection** is a stack of satellite images filtered by date and location.
+  Think of it as a folder of images you can filter, sort, and process with one command.
+- **ee.Reducer.mean()** aggregates all pixels in a region to a single average value.
+  This is how you convert a spatial image into a single number for a time series.
+- **`.map()` in GEE** applies a function to every image in a collection. It runs on
+  GEE's servers in parallel — much faster than a Python for loop.
+- **Median composite** takes the middle pixel value across multiple images over time.
+  This removes clouds, shadows, and sensor noise. A median of 70 images is far cleaner
+  than any single image.
+- **Scale factor** — MODIS stores NDVI as integers multiplied by 10000 to save storage.
+  NDVI of 0.35 is stored as 3500. Always divide by 10000 when working with MODIS NDVI.
+- **MODIS vs Sentinel-2 for time series** — MODIS goes back to 2000 and updates every
+  16 days. Sentinel-2 only starts in 2017. For 10-year trend analysis, use MODIS.
+  For detailed spatial analysis of a single scene, use Sentinel-2.
+
+**What the data showed:**
+- Mean NDVI over 10 years: 0.208 (semi-arid, expected)
+- Trend: +0.0034 NDVI units per year (gradual greening confirmed)
+- Peak month: August. Lowest month: April. Seasonal amplitude: 0.165
+- This confirms the Sahel greening phenomenon documented in the scientific literature.
+
+**What to remember:** `.getInfo()` fetches data from GEE to local Python. Every call is
+a round trip to Google's servers. Use it sparingly — one call to get the full time series
+is better than calling it inside a loop for each image. That would be 253 separate
+network requests instead of one.
