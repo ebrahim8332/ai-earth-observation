@@ -113,8 +113,9 @@ Update the checkbox and add a one-line note after each day is complete.
 - [ ] Day 3: EO Explorer v1.1 with spectral index module
 - [x] Day 4: GEE NDVI time series notebook — Sahel 10-year NDVI, 253 data points, trend +0.0034/year
 - [x] Day 5: Sentinel-1 SAR basics notebook — Rotterdam port, VV/VH/false color, backscatter change map
-- [ ] Day 6: EO Explorer v1.2 with drone imagery module
-- [ ] Day 7: Week 1 review and team primer document
+- [ ] Day 6: GEE Time Series Explorer portal module
+- [ ] Day 7: Portal redesign and Welcome module
+- [ ] Day 8: Week 1 review and team primer document
 
 ### Week 2: Core Analysis and AI Integration
 

@@ -301,7 +301,15 @@ Day 6   Drone and Aerial Imagery
         selection with area statistics export.
         Output: EO Explorer v1.2 deployed
 
-Day 7   Week 1 Review
+Day 7   Portal Redesign and Welcome Module
+        Replace the sample-data themed layer map in the first portal tab
+        with a proper Welcome and Overview panel.
+        Content: what the portal is, what each module does, how to use it.
+        Move Spectral Explorer to its own sidebar module.
+        Drone imagery deferred to a later day.
+        Output: redesigned portal deployed
+
+Day 8   Week 1 Review
         Audit all notebooks for missing documentation.
         Write team primer document: docs/learning_notes/week1-primer.md
         Update README.md with all deployed app URLs.
