@@ -67,6 +67,20 @@ def geocode_place(place_name: str) -> list | None:
         return None
 
 
+def bbox_dims_km(bbox: list) -> tuple:
+    """
+    Return the approximate (width_km, height_km) of a bounding box.
+    Used to display size to the user and warn if the area is too large for SAR.
+    """
+    import math
+    lon_diff  = abs(bbox[2] - bbox[0])
+    lat_diff  = abs(bbox[3] - bbox[1])
+    mid_lat   = (bbox[1] + bbox[3]) / 2
+    km_per_lon = 111.0 * math.cos(math.radians(mid_lat))
+    km_per_lat = 111.0
+    return round(lon_diff * km_per_lon, 0), round(lat_diff * km_per_lat, 0)
+
+
 def bbox_area_km2(bbox: list) -> float:
     """
     Estimate the area of a bounding box in square kilometres.

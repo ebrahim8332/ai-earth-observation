@@ -7,6 +7,7 @@ v1.0  Day 1: EO Explorer foundational app
 v1.1  Day 3: Spectral Explorer tab added
 v1.2  Day 6: Time Series Explorer module added; sidebar navigation replaces tab navigation
 v1.3  Day 6: Spectral Explorer promoted to standalone sidebar module; tabs removed
+v1.4  Day 7: SAR Explorer added; EO Explorer replaced with Welcome panel
 """
 
 import streamlit as st
@@ -23,6 +24,7 @@ import satellite_catalog
 import geocoder
 import spectral_explorer
 import gee_timeseries
+import gee_sar
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -58,7 +60,7 @@ with st.sidebar:
     st.markdown("### Module")
     selected_module = st.radio(
         "Navigate",
-        ["🗺️ EO Explorer", "🔬 Spectral Explorer", "📈 Time Series Explorer"],
+        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "📡 SAR Explorer"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -1173,84 +1175,436 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
     st.stop()
 
 # ---------------------------------------------------------------------------
-# MODULE 1 — EO Explorer (reached only when EO Explorer is selected)
+# MODULE 3 — SAR Explorer (reached only when SAR Explorer is selected)
 # ---------------------------------------------------------------------------
 
-with st.sidebar:
-    st.header("EO Explorer Controls")
+if selected_module == "📡 SAR Explorer":
 
-    theme_options   = list(data_catalog.THEMES.keys())
-    selected_theme  = st.selectbox("Theme", theme_options)
+    gee_available = st.session_state.gee_available
 
-    location_options   = list(map_builder.LOCATIONS.keys())
-    selected_location  = st.selectbox("Location", location_options)
+    st.subheader("📡 SAR Explorer")
+    st.caption(
+        "Select a location and two dates. "
+        "The module fetches real Sentinel-1 radar data and shows how the surface changed."
+    )
 
-    dataset_options   = data_catalog.THEMES[selected_theme]["datasets"]
-    selected_dataset  = st.selectbox("Dataset", dataset_options)
+    with st.expander("ℹ️ What does this module do?", expanded=False):
+        st.markdown("""
+**This module answers the question: what can radar see that cameras cannot?**
 
-    ai_mode_options = [
-        "Explain selected theme",
-        "Explain selected dataset",
-        "Explain business use case",
-        "Explain limitations",
-        "Suggest next analysis",
-    ]
-    selected_ai_mode = st.selectbox("AI Mode", ai_mode_options)
+It fetches Sentinel-1 SAR (Synthetic Aperture Radar) data from Google Earth Engine
+for any location on Earth and compares two dates — even dates when cloud cover would
+make optical satellite imagery completely unusable.
+
+**What SAR is:**
+
+SAR satellites transmit their own microwave pulses toward the ground and record the
+energy that bounces back. Microwaves pass straight through clouds and work at night.
+This makes SAR the sensor of choice for flood mapping, ship detection, infrastructure
+monitoring, and tropical deforestation — anywhere optical sensors are blocked.
+
+**What you will see after running an analysis:**
+
+- **VV Polarization map** — surface roughness and vertical structures. Urban areas and
+  ships appear bright. Calm water appears very dark.
+- **VH Polarization map** — vegetation and volume scattering. Forest and crops appear
+  relatively brighter than in VV.
+- **False Color composite** — VV assigned to Red, VH to Green, VV/VH ratio to Blue.
+  Pink = urban, green = vegetation, dark = water, white = ships.
+- **Change Map** — VV difference between the two dates. Blue = backscatter increased
+  (new structures or ships arrived). Red = backscatter decreased (ships left or surface smoothed).
+- **Backscatter statistics** — VV and VH min/max/mean in dB for both dates
+- **AI interpretation** — plain-language explanation of what the values reveal
+
+**How to use it:**
+
+1. Type any location in the search box
+2. Pick two dates (the module searches a 10-day window around each date)
+3. Click Run Analysis
+        """)
+
+    # --- Controls ---
+    col_loc, col_d1, col_d2 = st.columns([3, 1, 1])
+
+    with col_loc:
+        sar_place = st.text_input(
+            "Location — port, city, coastline, or river delta (not a whole country)",
+            placeholder="e.g. Port of Rotterdam   |   Lagos harbour   |   Ganges delta   |   Singapore Strait",
+            key="sar_place",
+        )
+
+    with col_d1:
+        from datetime import date as _date, timedelta as _td
+        sar_date1 = st.date_input(
+            "Date 1",
+            value=_date(2024, 1, 10),
+            min_value=_date(2014, 1, 1),
+            max_value=_date.today(),
+            key="sar_date1",
+        )
+
+    with col_d2:
+        sar_date2 = st.date_input(
+            "Date 2",
+            value=_date(2024, 3, 15),
+            min_value=_date(2014, 1, 1),
+            max_value=_date.today(),
+            key="sar_date2",
+        )
+
+    _, col_run = st.columns([4, 1])
+    with col_run:
+        sar_run_btn = st.button(
+            "▶ Run Analysis", type="primary",
+            use_container_width=True, key="sar_run",
+        )
+
+    # --- Geocode location ---
+    sar_bbox        = None
+    sar_region_name = ""
+
+    if sar_place.strip():
+        cached_place = st.session_state.get("sar_geocoded_place", "")
+        cached_bbox  = st.session_state.get("sar_geocoded_bbox",  None)
+
+        if sar_place.strip() != cached_place:
+            with st.spinner(f"Looking up '{sar_place}'..."):
+                result_bbox = geocoder.geocode_place(sar_place)
+            if result_bbox:
+                st.session_state.sar_geocoded_place = sar_place.strip()
+                st.session_state.sar_geocoded_bbox  = result_bbox
+                cached_bbox = result_bbox
+            else:
+                st.session_state.sar_geocoded_place = ""
+                st.session_state.sar_geocoded_bbox  = None
+                cached_bbox = None
+                st.error(f"Could not find '{sar_place}'. Try a broader name.")
+
+        if cached_bbox:
+            sar_bbox        = cached_bbox
+            sar_region_name = sar_place.strip()
+
+            # Show the area size so the user can judge before running
+            w_km, h_km = geocoder.bbox_dims_km(sar_bbox)
+            st.caption(f"📍 {sar_region_name} — {w_km:.0f} km × {h_km:.0f} km")
+
+            # Warn if either dimension exceeds the useful SAR display threshold.
+            # Sentinel-1 at 10-20 m resolution rendered into a 400px image:
+            # anything wider than ~150 km loses all meaningful detail.
+            SAR_MAX_KM = 150
+            if w_km > SAR_MAX_KM or h_km > SAR_MAX_KM:
+                st.warning(
+                    f"**This area is too large for SAR detail.** "
+                    f"{sar_region_name} spans {w_km:.0f} km × {h_km:.0f} km. "
+                    f"Sentinel-1 resolution is 10-20 metres. At this scale, "
+                    f"individual features — ships, buildings, rivers — are invisible. "
+                    f"Try a specific port, harbour, city district, or coastal stretch "
+                    f"no wider than {SAR_MAX_KM} km."
+                )
+
+    # GEE status
+    if gee_available:
+        st.caption("🟢 GEE connected — live Sentinel-1 data active.")
+    else:
+        st.caption("🔴 GEE not connected. SAR Explorer requires live GEE data.")
 
     st.divider()
-    provider_status = ai_assistant.get_provider_status()
-    st.caption(f"AI: **{provider_status}**")
 
-col_map, col_explain = st.columns([3, 2])
+    # --- Session state initialisation ---
+    for _k, _v in [
+        ("sar_maps",   None), ("sar_stats1",  None), ("sar_stats2",  None),
+        ("sar_result_region", None), ("sar_result_date1", None),
+        ("sar_result_date2", None),  ("sar_ai_result",    None),
+    ]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
 
-with col_map:
-    st.subheader("Interactive Map")
-    fmap = map_builder.build_map(selected_location)
-    st_folium(fmap, use_container_width=True, height=550, returned_objects=[])
+    # --- Two-step run pattern (same as Time Series Explorer) ---
+    if sar_run_btn:
+        if not sar_bbox:
+            st.warning("Enter a location first.")
+        elif not gee_available:
+            st.error("SAR Explorer requires GEE credentials. Add GEE_SERVICE_ACCOUNT_JSON to Streamlit secrets.")
+        elif sar_date1 >= sar_date2:
+            st.error("Date 1 must be before Date 2.")
+        else:
+            st.session_state.sar_maps        = None
+            st.session_state.sar_stats1      = None
+            st.session_state.sar_stats2      = None
+            st.session_state.sar_ai_result   = None
+            st.session_state.sar_pending_run = {
+                "bbox":   sar_bbox,
+                "date1":  str(sar_date1),
+                "date2":  str(sar_date2),
+                "region": sar_region_name,
+            }
+            st.rerun()
 
-with col_explain:
-    st.subheader("Dataset and Theme Overview")
-    theme_data = data_catalog.THEMES[selected_theme]
-    st.markdown(f"**Theme:** {selected_theme}")
-    st.markdown(theme_data["description"])
-    st.divider()
-    dataset_data = data_catalog.DATASETS.get(selected_dataset, {})
-    if dataset_data:
-        st.markdown(f"**Dataset:** {selected_dataset}")
-        st.markdown(f"- **What it measures:** {dataset_data['measures']}")
-        st.markdown(f"- **Sensors:** {dataset_data['sensors']}")
-        st.markdown(f"- **Resolution:** {dataset_data['resolution']}")
-        st.markdown(f"- **Revisit frequency:** {dataset_data['revisit']}")
-        st.markdown(f"- **Typical use cases:** {dataset_data['use_cases']}")
-        st.markdown(f"- **Key limitations:** {dataset_data['limitations']}")
+    if st.session_state.get("sar_pending_run"):
+        p = st.session_state.sar_pending_run
+        st.session_state.sar_pending_run = None
 
-st.divider()
-st.subheader("AI Assistant")
-st.caption(f"Mode: **{selected_ai_mode}** | Provider: **{provider_status}**")
+        with st.spinner(f"Fetching Sentinel-1 images for {p['region']}..."):
+            img1, count1, bbox1 = gee_sar.fetch_sar_image(p["bbox"], p["date1"], gee_available)
+            img2, count2, bbox2 = gee_sar.fetch_sar_image(p["bbox"], p["date2"], gee_available)
 
-user_question = st.text_input(
-    "Ask a question:",
-    placeholder="e.g. How does Sentinel-2 detect vegetation stress?",
-    key="tab1_question",
+        # Use the padded bbox for all downstream calls.
+        # fetch_sar_image expands point geocodes (e.g. "Port of Rotterdam") to
+        # MIN_BBOX_DEG so the SAR image covers a usable area.
+        eff_bbox = bbox1 if bbox1 else bbox2
+
+        if img1 is None or img2 is None:
+            st.error(
+                f"No Sentinel-1 images found near the selected dates for this location. "
+                f"Try dates that are further apart, or a different location. "
+                f"(Date 1: {count1} scenes found, Date 2: {count2} scenes found)"
+            )
+        else:
+            with st.spinner("Computing backscatter statistics..."):
+                stats1 = gee_sar.get_backscatter_stats(img1, eff_bbox)
+                stats2 = gee_sar.get_backscatter_stats(img2, eff_bbox)
+
+            with st.spinner("Downloading SAR images (this takes 20-40 seconds)..."):
+                maps = gee_sar.build_sar_views(img1, img2, eff_bbox, p["date1"], p["date2"])
+
+            st.session_state.sar_maps         = maps
+            st.session_state.sar_stats1       = stats1
+            st.session_state.sar_stats2       = stats2
+            st.session_state.sar_result_region = p["region"]
+            st.session_state.sar_result_date1  = p["date1"]
+            st.session_state.sar_result_date2  = p["date2"]
+            st.success(
+                f"Analysis complete — {p['date1']} and {p['date2']} over {p['region']}."
+            )
+
+    # --- Display results ---
+    if st.session_state.sar_maps is not None:
+        maps   = st.session_state.sar_maps
+        stats1 = st.session_state.sar_stats1
+        stats2 = st.session_state.sar_stats2
+        r_reg  = st.session_state.sar_result_region
+        r_d1   = st.session_state.sar_result_date1
+        r_d2   = st.session_state.sar_result_date2
+
+        def sar_section_break():
+            st.markdown(
+                '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 28px 0 20px 0;">',
+                unsafe_allow_html=True,
+            )
+
+        # --- SECTION 1: Backscatter statistics ---
+        st.subheader("📊 Backscatter Statistics")
+        col_s1, col_s2 = st.columns(2)
+
+        with col_s1:
+            st.markdown(f"**Date 1 — {r_d1}**")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("VV min",  f"{stats1['VV_min']} dB")
+            c2.metric("VV mean", f"{stats1['VV_mean']} dB")
+            c3.metric("VV max",  f"{stats1['VV_max']} dB")
+            c4, c5, c6 = st.columns(3)
+            c4.metric("VH min",  f"{stats1['VH_min']} dB")
+            c5.metric("VH mean", f"{stats1['VH_mean']} dB")
+            c6.metric("VH max",  f"{stats1['VH_max']} dB")
+
+        with col_s2:
+            st.markdown(f"**Date 2 — {r_d2}**")
+            c1, c2, c3 = st.columns(3)
+            vv_delta = stats2['VV_mean'] - stats1['VV_mean']
+            vh_delta = stats2['VH_mean'] - stats1['VH_mean']
+            c1.metric("VV min",  f"{stats2['VV_min']} dB")
+            c2.metric("VV mean", f"{stats2['VV_mean']} dB", delta=f"{vv_delta:+.1f} dB")
+            c3.metric("VV max",  f"{stats2['VV_max']} dB")
+            c4, c5, c6 = st.columns(3)
+            c4.metric("VH min",  f"{stats2['VH_min']} dB")
+            c5.metric("VH mean", f"{stats2['VH_mean']} dB", delta=f"{vh_delta:+.1f} dB")
+            c6.metric("VH max",  f"{stats2['VH_max']} dB")
+
+        sar_section_break()
+
+        # --- SECTION 2: Stats chart ---
+        st.subheader("📈 Backscatter Comparison Chart")
+        fig_stats = gee_sar.build_stats_chart(stats1, stats2, r_d1, r_d2)
+        st.plotly_chart(fig_stats, use_container_width=True)
+
+        st.caption(
+            "**Reading the chart:** Values near -20 dB = calm water. "
+            "-10 to -15 dB = vegetation. Above -5 dB = urban areas or ships. "
+            "VV responds to vertical structures. VH responds to vegetation volume."
+        )
+
+        sar_section_break()
+
+        # --- SECTION 3: SAR Images ---
+        # Images are downloaded server-side using GEE getThumbURL so the
+        # service account credentials work. Browser never needs to authenticate.
+        st.subheader("🗺️ SAR Views")
+
+        view_captions = {
+            "VV Polarization": (
+                "VV (Vertical transmit, Vertical receive). "
+                "Dark = calm water. Bright = urban areas, ships, metal structures."
+            ),
+            "VH Polarization": (
+                "VH (Vertical transmit, Horizontal receive). "
+                "Brighter than VV over vegetation — responds to volume scattering in canopy."
+            ),
+            "False Color": (
+                "Red = VV, Green = VH, Blue = VV/VH ratio. "
+                "Pink/magenta = urban. Green = vegetation. Dark = water. White = ships."
+            ),
+            "Change Map": (
+                "VV change: Date 2 minus Date 1. "
+                "Blue = backscatter increased (ships arrived, new structures). "
+                "Red = backscatter decreased (ships left, surface smoothed). "
+                "Yellow/white = no change."
+            ),
+        }
+
+        if maps:
+            tab_labels = list(maps.keys())
+            map_tabs   = st.tabs(tab_labels)
+
+            for tab, view_name in zip(map_tabs, tab_labels):
+                with tab:
+                    st.caption(view_captions.get(view_name, ""))
+                    view_data = maps[view_name]
+
+                    if view_name == "Change Map":
+                        arr = view_data.get("single")
+                        if arr is not None:
+                            st.image(arr, caption=f"VV change — {r_d1} to {r_d2}",
+                                     width=500)
+                        else:
+                            st.warning("Change map image could not be downloaded.")
+
+                    else:
+                        arr1 = view_data.get("date1")
+                        arr2 = view_data.get("date2")
+                        col_img1, col_img2 = st.columns(2)
+                        with col_img1:
+                            if arr1 is not None:
+                                st.image(arr1, caption=f"Date 1 — {r_d1}",
+                                         width=450)
+                            else:
+                                st.warning(f"Date 1 image failed to download.")
+                        with col_img2:
+                            if arr2 is not None:
+                                st.image(arr2, caption=f"Date 2 — {r_d2}",
+                                         width=450)
+                            else:
+                                st.warning(f"Date 2 image failed to download.")
+        else:
+            st.warning("SAR images could not be downloaded. Check GEE connection.")
+
+        sar_section_break()
+
+        # --- SECTION 4: AI Interpretation ---
+        st.subheader("🤖 AI Interpretation")
+        if st.button("Get AI Interpretation", type="primary", key="sar_ai_btn"):
+            with st.spinner("Thinking..."):
+                interpretation = gee_sar.get_sar_interpretation(
+                    stats1, stats2, r_d1, r_d2, r_reg,
+                    api_key=config.GROQ_API_KEY or None,
+                )
+                st.session_state.sar_ai_result = interpretation
+
+        if st.session_state.get("sar_ai_result"):
+            st.markdown(st.session_state.sar_ai_result)
+
+    else:
+        st.markdown("---")
+        st.markdown(
+            "**Type a location above, pick two dates, then click Run Analysis.**\n\n"
+            "The module will fetch live Sentinel-1 radar data and show VV, VH, "
+            "false color, and change maps alongside backscatter statistics."
+        )
+
+    st.stop()
+
+# ---------------------------------------------------------------------------
+# MODULE 0 — Welcome panel (default when Welcome is selected)
+# ---------------------------------------------------------------------------
+
+st.markdown("## Welcome to the EOIL Portal")
+st.markdown(
+    "This portal is a working demonstration of AI-native Earth observation analysis. "
+    "It pulls real satellite data from ESA, NASA, and Google Earth Engine."
 )
 
-if st.button("Ask", type="primary", key="tab1_ask"):
-    if user_question.strip():
-        with st.spinner("Thinking..."):
-            try:
-                response = ai_assistant.ask(
-                    question=user_question,
-                    theme=selected_theme,
-                    dataset=selected_dataset,
-                    location=selected_location,
-                    mode=selected_ai_mode,
-                )
-                st.markdown(response)
-            except Exception as e:
-                st.error(f"AI call failed: {e}")
-    else:
-        st.warning("Type a question before submitting.")
-else:
-    # Show a static prompt instead of making a live AI call on every render.
-    # Auto-calling AI on every render was causing the app to hang on load.
-    st.caption("Type a question above and click Ask to get an AI response.")
+st.divider()
+
+st.markdown("### What you can do here")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("#### 🔬 Spectral Explorer")
+    st.markdown(
+        "Fetch real satellite imagery from NASA and ESA archives for any location. "
+        "Render the same scene through different spectral band combinations — "
+        "vegetation health, water extent, urban heat, burn scars, and more. "
+        "Compare all views side by side."
+    )
+    st.markdown("**Sensor:** Sentinel-2, Landsat 8/9")
+    st.markdown("**Data:** Planetary Computer (Microsoft)")
+    st.markdown("**Question:** What can satellites see that cameras cannot?")
+
+with col2:
+    st.markdown("#### 📈 Time Series Explorer")
+    st.markdown(
+        "Pull 10+ years of satellite measurements for any location on Earth. "
+        "See how vegetation greenness or land surface temperature has shifted "
+        "over time. Trend analysis, seasonal cycles, and annual comparison charts."
+    )
+    st.markdown("**Sensor:** MODIS Terra, Landsat 8")
+    st.markdown("**Data:** Google Earth Engine")
+    st.markdown("**Question:** How has this location changed over time?")
+
+with col3:
+    st.markdown("#### 📡 SAR Explorer")
+    st.markdown(
+        "Analyse Sentinel-1 radar data for any location and two dates. "
+        "SAR works through clouds and at night — it reveals ships, infrastructure, "
+        "and surface change that optical sensors miss. VV, VH, false color, "
+        "and change maps included."
+    )
+    st.markdown("**Sensor:** Sentinel-1 GRD (ESA / Copernicus)")
+    st.markdown("**Data:** Google Earth Engine")
+    st.markdown("**Question:** What can radar see that cameras cannot?")
+
+st.divider()
+
+st.markdown("### How to get started")
+st.markdown(
+    "Use the **sidebar on the left** to navigate between modules. "
+    "Each module has an info panel that explains what it does and how to use it. "
+    "All modules pull live data — nothing here is simulated."
+)
+
+st.divider()
+
+st.markdown("### About this portal")
+col_a, col_b = st.columns(2)
+
+with col_a:
+    st.markdown(
+        "The EOIL Portal is built as part of the AI-Native Earth Observation "
+        "Innovation Lab — a 30-day program to rebuild satellite data analysis skills "
+        "and integrate modern AI into every workflow."
+    )
+
+with col_b:
+    st.markdown("**Technology stack:**")
+    st.markdown("- Streamlit — app framework")
+    st.markdown("- Google Earth Engine — satellite data processing at scale")
+    st.markdown("- Planetary Computer — optical satellite archive")
+    st.markdown("- Groq (Llama 3.3 70B) — AI interpretation")
+    st.markdown("- Folium / Plotly — interactive maps and charts")
+
+st.divider()
+st.caption(
+    "EOIL Portal v1.4 — Earth Observation Innovation Lab. "
+    "Built with Claude Code. "
+    "Login and access controls will be added in a future version."
+)
