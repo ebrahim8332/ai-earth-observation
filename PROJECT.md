@@ -7,10 +7,10 @@
 
 ## Current Status
 
-**Program day:** 1
+**Program day:** 7 complete
 **Phase:** Week 1 - Orientation and Data Access
-**Last completed:** Repository scaffold and requirements.txt created
-**Next session:** Build EO Explorer v1.0
+**Last completed:** SAR Explorer module built and deployed; Welcome panel added; EO Explorer retired; bbox size warning and km display added to SAR module
+**Next session:** Day 8 — Week 1 review document; additional Time Series indices (EVI, NDWI, Burned Area)
 
 ---
 
@@ -43,9 +43,11 @@ Sidebar navigation routes between modules. One URL for everything.
 
 | Module | Added Day | Status |
 |--------|-----------|--------|
-| EO Explorer | 1-3 | Live |
-| GEE Time Series Explorer | 6 | Planned |
-| EO Explorer v1.2 (drone) | 7 | Planned |
+| Welcome Panel | 7 | Live |
+| Spectral Explorer | 3 | Live |
+| Time Series Explorer | 6 | Live |
+| SAR Explorer | 7 | Live |
+| EO Explorer v1.2 (drone) | future | Planned |
 | Change Detection | 9 | Planned |
 | AI Imagery Interpreter | 10 | Planned |
 | EO Conversational Assistant | 13 | Planned |
@@ -93,12 +95,34 @@ Track which dependency groups are active.
 
 ## Blockers and Notes
 
-_Add any blockers, decisions, or notes here during the program._
-
 - GEE account: must be activated before Day 4. Request at earthengine.google.com
 - Groq API key: get at console.groq.com
 - Gemini API key: get at aistudio.google.com
 - Mapbox token: get at mapbox.com
+- GEE credentials: service account JSON stored in apps/01_eo_explorer/.streamlit/secrets.toml (local only, gitignored). For Streamlit Cloud deployment, add GEE_SERVICE_ACCOUNT_JSON to the app's secrets in the Streamlit Cloud dashboard.
+
+---
+
+## Backlog — SAR Explorer improvements
+
+- **Map picker for location** (Option D): Replace text geocoding with a small Folium map the user clicks to set the centre point. Build the bbox around the click. Eliminates all geocoding ambiguity for port and industrial feature queries. Text geocoding stays as a fallback for users who want to type a city name first, then fine-tune on the map.
+- Known bad geocodes: "Port of Rotterdam" resolves to an inland agricultural area. "Maasvlakte Rotterdam" or coordinates work correctly.
+
+---
+
+## Backlog — Time Series Explorer improvements (carry into Day 7+)
+
+These were identified during Day 6 testing. Do not forget.
+
+**Additional indices to add to the Dataset dropdown:**
+- EVI (Enhanced Vegetation Index) — already in MODIS/061/MOD13Q1, same collection as NDVI. Just add a new entry to DATASETS dict in gee_timeseries.py. Easiest add.
+- NDWI (Normalized Difference Water Index) — requires Landsat band math (NIR minus SWIR divided by NIR plus SWIR). Measures water content and wetness.
+- Burned Area — MODIS MCD64A1 collection, pre-computed. Shows fire extent over time.
+- Plan: add EVI first (10 min), then NDWI and Burned Area in a later session.
+
+**Other Time Series improvements noted:**
+- The GIBS tile overlay on the old comparison maps was not rendering visibly. Replaced with Annual Comparison bar chart (done Day 6). No further action needed.
+- Consider adding a "What does this index measure?" tooltip or expander next to the dataset selector so users understand what they are looking at before running analysis.
 
 ---
 
@@ -113,8 +137,8 @@ Update the checkbox and add a one-line note after each day is complete.
 - [ ] Day 3: EO Explorer v1.1 with spectral index module
 - [x] Day 4: GEE NDVI time series notebook — Sahel 10-year NDVI, 253 data points, trend +0.0034/year
 - [x] Day 5: Sentinel-1 SAR basics notebook — Rotterdam port, VV/VH/false color, backscatter change map
-- [ ] Day 6: GEE Time Series Explorer portal module
-- [ ] Day 7: Portal redesign and Welcome module
+- [x] Day 6: GEE Time Series Explorer portal module — MODIS NDVI, LST; Annual Comparison chart; GEE credentials
+- [x] Day 7: SAR Explorer module — Sentinel-1 VV/VH/false color/change map; Welcome panel; bbox size warning
 - [ ] Day 8: Week 1 review and team primer document
 
 ### Week 2: Core Analysis and AI Integration

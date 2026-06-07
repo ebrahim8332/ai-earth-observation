@@ -106,6 +106,17 @@ Each module has its own files inside apps/01_eo_explorer/.
 The main app.py routes between modules via the sidebar.
 New modules are added per day as new files. The core app does not change.
 
+Current portal modules (app.py v1.4):
+  Module 0 — Welcome panel (default landing page)
+  Module 1 — Spectral Explorer (Planetary Computer, optical imagery)
+  Module 2 — Time Series Explorer (GEE, MODIS NDVI/LST)
+  Module 3 — SAR Explorer (GEE, Sentinel-1 GRD, VV/VH/false color/change map)
+
+GEE credentials: stored in apps/01_eo_explorer/.streamlit/secrets.toml (local, gitignored).
+On Streamlit Cloud: add GEE_SERVICE_ACCOUNT_JSON to app secrets dashboard.
+Service account: eoil-gee-service@gen-lang-client-0093165324.iam.gserviceaccount.com
+Project: gen-lang-client-0093165324
+
 ---
 
 ## Repository Structure
@@ -119,7 +130,7 @@ earth-observation-innovation-lab/
 â”œâ”€â”€ .env.example
 â”‚
 â”œâ”€â”€ apps/
-â”‚   â”œâ”€â”€ 01_eo_explorer/          â† Day 1-6: foundational app, versioned
+â”‚   â”œâ”€â”€ 01_eo_explorer/          â† Days 1-7: portal app — Welcome, Spectral Explorer, Time Series Explorer, SAR Explorer
 â”‚   â”œâ”€â”€ 02_change_detection/     â† Day 9
 â”‚   â”œâ”€â”€ 03_ai_imagery/           â† Day 10
 â”‚   â”œâ”€â”€ 04_eo_assistant/         â† Day 13
@@ -526,4 +537,6 @@ At the start of every Claude Code session:
 - When a session is complete, tell me exactly what was built, what the
   commit message was, and what the next session will cover.
 - Keep responses direct. No filler. No motivational language.
+
+
 
