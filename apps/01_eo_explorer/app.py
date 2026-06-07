@@ -8,6 +8,7 @@ v1.1  Day 3: Spectral Explorer tab added
 v1.2  Day 6: Time Series Explorer module added; sidebar navigation replaces tab navigation
 v1.3  Day 6: Spectral Explorer promoted to standalone sidebar module; tabs removed
 v1.4  Day 7: SAR Explorer added; EO Explorer replaced with Welcome panel
+v1.5  Day 9: Change Detection module added (fifth sidebar entry)
 """
 
 import streamlit as st
@@ -25,6 +26,7 @@ import geocoder
 import spectral_explorer
 import gee_timeseries
 import gee_sar
+import gee_change
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -60,7 +62,7 @@ with st.sidebar:
     st.markdown("### Module")
     selected_module = st.radio(
         "Navigate",
-        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "📡 SAR Explorer"],
+        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "📡 SAR Explorer", "🔀 Change Detection"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -1492,6 +1494,259 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
     st.stop()
 
 # ---------------------------------------------------------------------------
+# MODULE 4 — Change Detection (reached only when Change Detection is selected)
+# ---------------------------------------------------------------------------
+
+if selected_module == "🔀 Change Detection":
+
+    from streamlit_folium import st_folium as _st_folium
+    from datetime import date as _date
+
+    gee_available = st.session_state.gee_available
+
+    st.subheader("🔀 Change Detection")
+    st.caption(
+        "Select a location and two dates. "
+        "The module computes the NDVI difference and shows where vegetation gained or lost."
+    )
+
+    with st.expander("ℹ️ What does this module do?", expanded=False):
+        st.markdown("""
+**This module answers the question: what changed between two dates?**
+
+It fetches Sentinel-2 satellite imagery for two dates and computes the NDVI difference —
+a pixel-by-pixel comparison of vegetation greenness. Where NDVI increased, vegetation
+grew or recovered. Where NDVI decreased, vegetation died, burned, or was removed.
+
+**What you will see after running an analysis:**
+
+- **Summary statistics** — mean NDVI change, area of significant gain, area of significant loss
+- **Interactive change map** — three toggleable layers: NDVI Date 1, NDVI Date 2, and the change map
+  (green = gain, red = loss, white = no change). Toggle layers using the control in the top-right corner.
+- **AI interpretation** — plain-language explanation of what likely caused the change
+
+**How to use it:**
+
+1. Type any location in the search box
+2. Pick two dates (the module searches a 30-day window around each date for cloud-free imagery)
+3. Click Run Analysis
+
+**Data source:** Sentinel-2 Surface Reflectance (COPERNICUS/S2_SR_HARMONIZED) via Google Earth Engine.
+MODIS is used as a fallback if Sentinel-2 has insufficient cloud-free coverage.
+
+**NDVI:** Normalized Difference Vegetation Index = (NIR - Red) / (NIR + Red).
+Values range from 0 (bare soil) to 0.9 (dense forest). A change of ±0.1 is the threshold
+for significant change in this module.
+        """)
+
+    # --- Controls ---
+    col_loc, col_d1, col_d2 = st.columns([3, 1, 1])
+
+    with col_loc:
+        cd_place = st.text_input(
+            "Location — type any region, country, or ecosystem",
+            placeholder="e.g. Sahel, West Africa   |   Amazon, Brazil   |   California, USA",
+            key="cd_place",
+        )
+
+    with col_d1:
+        cd_date1 = st.date_input(
+            "Date 1",
+            value=_date(2023, 2, 1),
+            min_value=_date(2017, 1, 1),
+            max_value=_date.today(),
+            key="cd_date1",
+        )
+
+    with col_d2:
+        cd_date2 = st.date_input(
+            "Date 2",
+            value=_date(2023, 9, 1),
+            min_value=_date(2017, 1, 1),
+            max_value=_date.today(),
+            key="cd_date2",
+        )
+
+    _, col_run = st.columns([4, 1])
+    with col_run:
+        cd_run_btn = st.button(
+            "▶ Run Analysis", type="primary",
+            use_container_width=True, key="cd_run",
+        )
+
+    # --- Geocode ---
+    cd_bbox        = None
+    cd_region_name = ""
+
+    if cd_place.strip():
+        cached_place = st.session_state.get("cd_geocoded_place", "")
+        cached_bbox  = st.session_state.get("cd_geocoded_bbox",  None)
+
+        if cd_place.strip() != cached_place:
+            with st.spinner(f"Looking up '{cd_place}'..."):
+                result_bbox = geocoder.geocode_place(cd_place)
+            if result_bbox:
+                st.session_state.cd_geocoded_place = cd_place.strip()
+                st.session_state.cd_geocoded_bbox  = result_bbox
+                cached_bbox = result_bbox
+            else:
+                st.session_state.cd_geocoded_place = ""
+                st.session_state.cd_geocoded_bbox  = None
+                cached_bbox = None
+                st.error(f"Could not find '{cd_place}'. Try a broader name.")
+
+        if cached_bbox:
+            cd_bbox        = cached_bbox
+            cd_region_name = cd_place.strip()
+            st.caption(f"📍 {cd_region_name}")
+
+    if gee_available:
+        st.caption("🟢 GEE connected — live Sentinel-2 / MODIS data active.")
+    else:
+        st.caption("🔴 GEE not connected. Change Detection requires live GEE data.")
+
+    st.divider()
+
+    # --- Session state ---
+    for _k, _v in [
+        ("cd_map",           None), ("cd_stats",         None),
+        ("cd_result_region", None), ("cd_result_date1",  None),
+        ("cd_result_date2",  None), ("cd_result_src1",   None),
+        ("cd_result_src2",   None), ("cd_ai_result",     None),
+    ]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
+
+    # --- Two-step run pattern ---
+    if cd_run_btn:
+        if not cd_bbox:
+            st.warning("Enter a location first.")
+        elif not gee_available:
+            st.error("Change Detection requires GEE credentials. Add GEE_SERVICE_ACCOUNT_JSON to Streamlit secrets.")
+        elif cd_date1 >= cd_date2:
+            st.error("Date 1 must be before Date 2.")
+        else:
+            st.session_state.cd_map        = None
+            st.session_state.cd_stats      = None
+            st.session_state.cd_ai_result  = None
+            st.session_state.cd_pending_run = {
+                "bbox":   cd_bbox,
+                "date1":  str(cd_date1),
+                "date2":  str(cd_date2),
+                "region": cd_region_name,
+            }
+            st.rerun()
+
+    if st.session_state.get("cd_pending_run"):
+        p = st.session_state.cd_pending_run
+        st.session_state.cd_pending_run = None
+
+        with st.spinner(f"Fetching NDVI Date 1 ({p['date1']}) for {p['region']}..."):
+            img1, src1 = gee_change.fetch_ndvi_image(p["bbox"], p["date1"], gee_available)
+
+        with st.spinner(f"Fetching NDVI Date 2 ({p['date2']}) for {p['region']}..."):
+            img2, src2 = gee_change.fetch_ndvi_image(p["bbox"], p["date2"], gee_available)
+
+        if img1 is None or img2 is None:
+            st.error(
+                "Could not retrieve NDVI imagery for one or both dates. "
+                "Try a wider date range, a different location, or check GEE credentials."
+            )
+        else:
+            with st.spinner("Computing change statistics..."):
+                diff_img = img2.subtract(img1).rename("NDVI_diff")
+                stats = gee_change.compute_change_stats(diff_img, p["bbox"], gee_available)
+
+            with st.spinner("Building change map (20-40 seconds)..."):
+                cd_map = gee_change.build_change_map(
+                    img1, img2, p["bbox"], p["date1"], p["date2"], gee_available
+                )
+
+            st.session_state.cd_map          = cd_map
+            st.session_state.cd_stats        = stats
+            st.session_state.cd_result_region = p["region"]
+            st.session_state.cd_result_date1  = p["date1"]
+            st.session_state.cd_result_date2  = p["date2"]
+            st.session_state.cd_result_src1   = src1
+            st.session_state.cd_result_src2   = src2
+            st.success(
+                f"Analysis complete — {p['date1']} and {p['date2']} over {p['region']}. "
+                f"Date 1 source: {src1}. Date 2 source: {src2}."
+            )
+
+    # --- Display results ---
+    if st.session_state.cd_stats is not None:
+        stats  = st.session_state.cd_stats
+        r_reg  = st.session_state.cd_result_region
+        r_d1   = st.session_state.cd_result_date1
+        r_d2   = st.session_state.cd_result_date2
+
+        def cd_section_break():
+            st.markdown(
+                '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 28px 0 20px 0;">',
+                unsafe_allow_html=True,
+            )
+
+        # --- SECTION 1: Summary statistics ---
+        st.subheader("📊 Change Statistics")
+
+        c1, c2, c3, c4 = st.columns(4)
+        delta_color = "normal" if stats["mean_change"] >= 0 else "inverse"
+        c1.metric("Mean NDVI change", f"{stats['mean_change']:+.4f}",
+                  delta="Greening" if stats["mean_change"] > 0 else "Browning",
+                  delta_color=delta_color)
+        c2.metric(f"Gain area (>{gee_change.CHANGE_THRESHOLD} NDVI)",
+                  f"{stats['area_gain_km2']:,.0f} km²",
+                  delta=f"{stats['pct_gain']:.1f}% of region")
+        c3.metric(f"Loss area (<-{gee_change.CHANGE_THRESHOLD} NDVI)",
+                  f"{stats['area_loss_km2']:,.0f} km²",
+                  delta=f"{stats['pct_loss']:.1f}% of region")
+        c4.metric("Total area analysed", f"{stats['area_total_km2']:,.0f} km²")
+
+        cd_section_break()
+
+        # --- SECTION 2: Change map ---
+        st.subheader("🗺️ Change Map")
+        st.caption(
+            "Toggle layers using the control in the top-right corner of the map. "
+            "**Change map** is shown by default: green = vegetation gain, red = vegetation loss, white = stable. "
+            "Switch to NDVI Date 1 or Date 2 to see the raw greenness values."
+        )
+
+        if st.session_state.cd_map is not None:
+            _st_folium(st.session_state.cd_map, width=700, height=520, returned_objects=[])
+        else:
+            st.warning("Map could not be built. Check GEE connection.")
+
+        cd_section_break()
+
+        # --- SECTION 3: AI Interpretation ---
+        st.subheader("🤖 AI Interpretation")
+        if st.button("Get AI Interpretation", type="primary", key="cd_ai_btn"):
+            with st.spinner("Thinking..."):
+                interpretation = gee_change.get_change_interpretation(
+                    stats,
+                    r_d1, r_d2, r_reg,
+                    st.session_state.cd_result_src1,
+                    st.session_state.cd_result_src2,
+                    api_key=config.GROQ_API_KEY or None,
+                )
+                st.session_state.cd_ai_result = interpretation
+
+        if st.session_state.get("cd_ai_result"):
+            st.markdown(st.session_state.cd_ai_result)
+
+    else:
+        st.markdown("---")
+        st.markdown(
+            "**Type a location above, pick two dates, then click Run Analysis.**\n\n"
+            "The module will compute the NDVI difference and show an interactive change map "
+            "alongside summary statistics and an AI interpretation."
+        )
+
+    st.stop()
+
+# ---------------------------------------------------------------------------
 # MODULE 0 — Welcome panel (default when Welcome is selected)
 # ---------------------------------------------------------------------------
 
@@ -1544,6 +1799,21 @@ with col3:
 
 st.divider()
 
+col4, _ = st.columns([1, 2])
+
+with col4:
+    st.markdown("#### 🔀 Change Detection")
+    st.markdown(
+        "Select any location and two dates. The module computes the NDVI difference "
+        "between the two dates and shows where vegetation increased or decreased. "
+        "Interactive change map with toggleable layers and AI interpretation."
+    )
+    st.markdown("**Sensor:** Sentinel-2 SR, MODIS (fallback)")
+    st.markdown("**Data:** Google Earth Engine")
+    st.markdown("**Question:** What changed between two dates?")
+
+st.divider()
+
 st.markdown("### How to get started")
 st.markdown(
     "Use the **sidebar on the left** to navigate between modules. "
@@ -1573,7 +1843,7 @@ with col_b:
 
 st.divider()
 st.caption(
-    "EOIL Portal v1.4 — Earth Observation Innovation Lab. "
+    "EOIL Portal v1.5 — Earth Observation Innovation Lab. "
     "Built with Claude Code. "
     "Login and access controls will be added in a future version."
 )
