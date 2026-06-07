@@ -256,7 +256,7 @@ def _call_gemini_vision(
         ])],
         config = types.GenerateContentConfig(
             temperature       = 0.3,
-            max_output_tokens = 2048,
+            max_output_tokens = 4096,  # 2.5-flash uses thinking tokens that reduce output budget
         ),
     )
 
