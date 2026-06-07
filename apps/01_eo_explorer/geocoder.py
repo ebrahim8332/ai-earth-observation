@@ -1,47 +1,105 @@
 """
-geocoder.py — Convert a place name to a bounding box using OpenStreetMap Nominatim.
+geocoder.py — Convert a place name to a bounding box.
 
-Nominatim is OpenStreetMap's free geocoding service. No API key required.
-Returns a bounding box [min_lon, min_lat, max_lon, max_lat] suitable for STAC queries.
-If geocoding fails, returns None and the caller falls back to a default location.
+Uses two geocoding services in sequence:
+  1. ArcGIS World Geocoding Service — free, no API key, very reliable under load.
+  2. OpenStreetMap Nominatim — free, no API key, rate-limited (1 req/sec).
+
+Returns a bounding box [min_lon, min_lat, max_lon, max_lat] suitable for STAC/GEE queries.
+Returns None if both services fail.
 """
 
-import requests
 import time
+import requests
 
-# Nominatim requires a User-Agent header identifying the application.
-# Using the project name as the identifier.
+# Default bbox size in degrees when a geocoder returns a point rather than a polygon.
+# 0.5 degrees is roughly 50 km — a reasonable default for city-level queries.
+DEFAULT_BBOX_SIZE_DEG = 0.5
+
+# Nominatim requires a descriptive User-Agent.
 NOMINATIM_HEADERS = {
-    "User-Agent": "EOIL-SpectralExplorer/1.0 (AI-Native Earth Observation Innovation Lab)"
+    "User-Agent": "EOIL-Portal/1.5 (AI-Native Earth Observation Innovation Lab; contact: eoil@example.com)"
 }
-
-# Default bbox size in degrees when Nominatim returns a point rather than a polygon.
-# 0.3 degrees is roughly 30 km — a reasonable default for city-level queries.
-DEFAULT_BBOX_SIZE_DEG = 0.3
 
 
 def geocode_place(place_name: str) -> list | None:
-    """
-    Search for a place name and return a bounding box [min_lon, min_lat, max_lon, max_lat].
+    """Convert a place name to a bounding box [min_lon, min_lat, max_lon, max_lat].
 
-    Uses the Nominatim API. If the place has a known polygon boundary, that is returned.
-    If only a point is found, a square bbox of DEFAULT_BBOX_SIZE_DEG is built around it.
-    Returns None if nothing is found or if the request fails.
+    Tries ArcGIS first (more reliable on shared IPs), then Nominatim as backup.
+    Returns None if both services fail or return no results.
     """
     if not place_name or not place_name.strip():
         return None
 
-    url = "https://nominatim.openstreetmap.org/search"
+    name = place_name.strip()
+
+    bbox = _geocode_arcgis(name)
+    if bbox:
+        return bbox
+
+    bbox = _geocode_nominatim(name)
+    return bbox
+
+
+# ---------------------------------------------------------------------------
+# ArcGIS World Geocoding Service — primary
+# Free for light use, no API key required. Very reliable under load.
+# Returns an extent object (bounding box) for region-level queries.
+# ---------------------------------------------------------------------------
+
+def _geocode_arcgis(place_name: str) -> list | None:
+    """Try the ArcGIS World Geocoding Service and return a bbox, or None."""
+    url    = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates"
     params = {
-        "q":              place_name.strip(),
+        "SingleLine": place_name,
+        "f":          "json",
+        "maxLocations": 1,
+        "outFields":  "Addr_type",
+    }
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data       = response.json()
+        candidates = data.get("candidates", [])
+
+        if not candidates:
+            return None
+
+        candidate = candidates[0]
+        extent    = candidate.get("extent")
+
+        if extent:
+            # ArcGIS returns extent as {xmin, ymin, xmax, ymax} — already in lon/lat
+            return [extent["xmin"], extent["ymin"], extent["xmax"], extent["ymax"]]
+
+        # Fall back to building a bbox around the returned point
+        loc  = candidate.get("location", {})
+        lon  = float(loc.get("x", 0))
+        lat  = float(loc.get("y", 0))
+        half = DEFAULT_BBOX_SIZE_DEG / 2
+        return [lon - half, lat - half, lon + half, lat + half]
+
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Nominatim (OpenStreetMap) — backup
+# Requires 1-second delay between requests per Nominatim usage policy.
+# May be rate-limited on shared cloud IPs under high load.
+# ---------------------------------------------------------------------------
+
+def _geocode_nominatim(place_name: str) -> list | None:
+    """Try Nominatim and return a bbox, or None."""
+    url    = "https://nominatim.openstreetmap.org/search"
+    params = {
+        "q":              place_name,
         "format":         "json",
         "limit":          1,
         "addressdetails": 0,
     }
-
     try:
-        # Nominatim asks for a 1-second delay between requests.
-        # In a web app this runs once per user action, so delay is minimal.
+        time.sleep(1)   # Nominatim usage policy: max 1 request per second
         response = requests.get(url, params=params, headers=NOMINATIM_HEADERS, timeout=10)
         response.raise_for_status()
         results = response.json()
@@ -51,15 +109,13 @@ def geocode_place(place_name: str) -> list | None:
 
         result = results[0]
 
-        # Nominatim returns a boundingbox as [south, north, west, east] strings.
-        # We reorder to [min_lon, min_lat, max_lon, max_lat] for STAC compatibility.
+        # Nominatim boundingbox is [south, north, west, east]
         if "boundingbox" in result:
             south, north, west, east = [float(x) for x in result["boundingbox"]]
             return [west, south, east, north]
 
-        # If no bounding box, build one around the returned point.
-        lat = float(result["lat"])
-        lon = float(result["lon"])
+        lat  = float(result["lat"])
+        lon  = float(result["lon"])
         half = DEFAULT_BBOX_SIZE_DEG / 2
         return [lon - half, lat - half, lon + half, lat + half]
 
