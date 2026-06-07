@@ -1,9 +1,12 @@
 """
-app.py — EO Explorer v1.1
+app.py — EOIL Portal v1.3
 Streamlit layout and component wiring only. No business logic here.
 All logic is imported from other modules.
 
-v1.1 adds a second tab: Spectral Explorer — interactive band combination viewer.
+v1.0  Day 1: EO Explorer foundational app
+v1.1  Day 3: Spectral Explorer tab added
+v1.2  Day 6: Time Series Explorer module added; sidebar navigation replaces tab navigation
+v1.3  Day 6: Spectral Explorer promoted to standalone sidebar module; tabs removed
 """
 
 import streamlit as st
@@ -19,21 +22,19 @@ import ai_assistant
 import satellite_catalog
 import geocoder
 import spectral_explorer
+import gee_timeseries
 
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="EO Explorer v1.1",
-    page_icon="🛰️",
+    page_title="EOIL Portal",
+    page_icon="🌍",
     layout="wide",
 )
 
-st.title("🛰️ EO Explorer v1.1")
-st.caption(
-    "Explore Earth Observation themes, visualize satellite data, and get "
-    "AI-powered explanations for real decisions."
-)
+st.title("🌍 EOIL Portal")
+st.caption("Earth Observation Innovation Lab — satellite data analysis and AI interpretation.")
 
 # Pointer cursor on all interactive controls
 st.markdown("""
@@ -49,6 +50,26 @@ input[type="range"] {
 }
 </style>
 """, unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Sidebar — module navigation (always visible at the top)
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.markdown("### Module")
+    selected_module = st.radio(
+        "Navigate",
+        ["🗺️ EO Explorer", "🔬 Spectral Explorer", "📈 Time Series Explorer"],
+        label_visibility="collapsed",
+    )
+    st.divider()
+
+# ---------------------------------------------------------------------------
+# GEE status — check once per session and cache the result
+# If GEE credentials are in Streamlit secrets, live queries are available.
+# If not, the Time Series Explorer uses sample data.
+# ---------------------------------------------------------------------------
+if "gee_available" not in st.session_state:
+    st.session_state.gee_available = gee_timeseries.init_gee()
 
 # ---------------------------------------------------------------------------
 # Helper: "What am I looking at?" expander content
@@ -313,107 +334,391 @@ only in the {r_wl} range.
                     """)
 
 
-# ---------------------------------------------------------------------------
-# Tabs
-# ---------------------------------------------------------------------------
-tab_explore, tab_spectral = st.tabs(["EO Explorer", "🔬 Spectral Explorer"])
-
-
 # ===========================================================================
-# TAB 1 — EO Explorer (original app, unchanged)
+# MODULE ROUTING
+# The Time Series Explorer renders first and calls st.stop() when active.
+# That prevents the EO Explorer code below from running.
+# The EO Explorer code needs no indentation changes — it just runs when
+# the Time Series module is not selected.
 # ===========================================================================
-with tab_explore:
 
-    with st.sidebar:
-        st.header("EO Explorer Controls")
+if selected_module == "📈 Time Series Explorer":
 
-        theme_options   = list(data_catalog.THEMES.keys())
-        selected_theme  = st.selectbox("Theme", theme_options)
+    # -----------------------------------------------------------------------
+    # MODULE 2 — Time Series Explorer
+    # All logic lives in gee_timeseries.py. This block handles layout only.
+    # -----------------------------------------------------------------------
 
-        location_options   = list(map_builder.LOCATIONS.keys())
-        selected_location  = st.selectbox("Location", location_options)
+    gee_available = st.session_state.gee_available
 
-        dataset_options   = data_catalog.THEMES[selected_theme]["datasets"]
-        selected_dataset  = st.selectbox("Dataset", dataset_options)
-
-        ai_mode_options = [
-            "Explain selected theme",
-            "Explain selected dataset",
-            "Explain business use case",
-            "Explain limitations",
-            "Suggest next analysis",
-        ]
-        selected_ai_mode = st.selectbox("AI Mode", ai_mode_options)
-
-        st.divider()
-        provider_status = ai_assistant.get_provider_status()
-        st.caption(f"AI: **{provider_status}**")
-
-    col_map, col_explain = st.columns([3, 2])
-
-    with col_map:
-        st.subheader("Interactive Map")
-        fmap = map_builder.build_map(selected_location)
-        st_folium(fmap, use_container_width=True, height=550, returned_objects=[])
-
-    with col_explain:
-        st.subheader("Dataset and Theme Overview")
-        theme_data = data_catalog.THEMES[selected_theme]
-        st.markdown(f"**Theme:** {selected_theme}")
-        st.markdown(theme_data["description"])
-        st.divider()
-        dataset_data = data_catalog.DATASETS.get(selected_dataset, {})
-        if dataset_data:
-            st.markdown(f"**Dataset:** {selected_dataset}")
-            st.markdown(f"- **What it measures:** {dataset_data['measures']}")
-            st.markdown(f"- **Sensors:** {dataset_data['sensors']}")
-            st.markdown(f"- **Resolution:** {dataset_data['resolution']}")
-            st.markdown(f"- **Revisit frequency:** {dataset_data['revisit']}")
-            st.markdown(f"- **Typical use cases:** {dataset_data['use_cases']}")
-            st.markdown(f"- **Key limitations:** {dataset_data['limitations']}")
-
-    st.divider()
-    st.subheader("AI Assistant")
-    st.caption(f"Mode: **{selected_ai_mode}** | Provider: **{provider_status}**")
-
-    user_question = st.text_input(
-        "Ask a question:",
-        placeholder="e.g. How does Sentinel-2 detect vegetation stress?",
-        key="tab1_question",
+    # --- Header ---
+    st.subheader("📈 Time Series Explorer")
+    st.caption(
+        "Select a dataset, location, and year range, then click Run Analysis."
     )
 
-    if st.button("Ask", type="primary", key="tab1_ask"):
-        if user_question.strip():
-            with st.spinner("Thinking..."):
-                try:
-                    response = ai_assistant.ask(
-                        question=user_question,
-                        theme=selected_theme,
-                        dataset=selected_dataset,
-                        location=selected_location,
-                        mode=selected_ai_mode,
-                    )
-                    st.markdown(response)
-                except Exception as e:
-                    st.error(f"AI call failed: {e}")
-        else:
-            st.warning("Type a question before submitting.")
+    with st.expander("ℹ️ What does this module do?", expanded=False):
+        st.markdown("""
+**This module answers the question: how has this location changed over time?**
+
+It pulls 10+ years of satellite measurements for any location on Earth and shows
+you how a chosen index — vegetation greenness, land surface temperature, or others —
+has shifted across the full period.
+
+**What you will see after running an analysis:**
+
+- **Summary metrics** — mean value, long-term trend per year, and seasonal amplitude at a glance
+- **Time series chart** — every data point plotted across the full date range, with a smoothed trend line and a linear trend overlay
+- **Seasonal cycle chart** — the average pattern by month, showing when values peak and trough across a typical year
+- **Annual comparison chart** — one bar per year, colour-coded to highlight how early years compare to recent years
+- **AI interpretation** — a plain-language explanation of what the data shows, why the pattern exists, and what it means in practice
+
+**How to use it:**
+
+1. Choose a dataset from the dropdown
+2. Type any city, country, or region in the location box
+3. Set the year range
+4. Click Run Analysis
+        """)
+
+    # --- Row 1: Dataset + Location (mirrors Spectral Explorer layout) ---
+    col_ds, col_loc = st.columns([1, 3])
+
+    with col_ds:
+        ts_dataset = st.selectbox(
+            "Dataset",
+            list(gee_timeseries.DATASETS.keys()),
+            key="ts_dataset",
+        )
+
+    with col_loc:
+        ts_custom_place = st.text_input(
+            "Location — type any city, country, or region",
+            placeholder="e.g. Sahel, West Africa   |   Tanzania   |   Patagonia   |   Fergana Valley",
+            key="ts_custom_place",
+        )
+
+    # --- Row 2: Year range + Run button ---
+    yr_col1, yr_col2, yr_col3 = st.columns([1, 1, 1], vertical_alignment="bottom")
+
+    with yr_col1:
+        ts_start_year = st.number_input(
+            "From year", min_value=2000, max_value=2023,
+            value=2014, step=1, key="ts_start_year",
+        )
+
+    with yr_col2:
+        ts_end_year = st.number_input(
+            "To year", min_value=2001, max_value=2024,
+            value=2024, step=1, key="ts_end_year",
+        )
+
+    with yr_col3:
+        run_btn = st.button(
+            "▶ Run Analysis", type="primary",
+            use_container_width=True, key="ts_run",
+        )
+
+    # Dataset educational info — collapsible, sits just below the controls
+    with st.expander("ℹ️ About this dataset", expanded=False):
+        ds_info = gee_timeseries.DATASETS[ts_dataset]
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown(f"**Sensor:** {ds_info['sensor']}")
+            st.markdown(f"**Resolution:** {ds_info['resolution']}")
+            st.markdown(f"**Revisit:** {ds_info['revisit']}")
+            st.markdown(f"**Available from:** {ds_info['available_from']}")
+        with col_b:
+            st.markdown(f"**Measures:** {ds_info['measures']}")
+            st.markdown(f"**Best for:** {ds_info['best_for']}")
+            st.markdown(f"**Limitation:** {ds_info['limitation']}")
+
+    st.divider()
+
+    # --- Resolve region from typed location ---
+    ts_bbox        = None
+    ts_region_name = ""
+
+    if ts_custom_place.strip():
+        cached_place = st.session_state.get("ts_geocoded_place", "")
+        cached_bbox  = st.session_state.get("ts_geocoded_bbox",  None)
+
+        if ts_custom_place.strip() != cached_place:
+            with st.spinner(f"Looking up '{ts_custom_place}'..."):
+                result_bbox = geocoder.geocode_place(ts_custom_place)
+            if result_bbox:
+                st.session_state.ts_geocoded_place = ts_custom_place.strip()
+                st.session_state.ts_geocoded_bbox  = result_bbox
+                cached_bbox = result_bbox
+            else:
+                st.session_state.ts_geocoded_place = ""
+                st.session_state.ts_geocoded_bbox  = None
+                cached_bbox = None
+                st.error(f"Could not geocode '{ts_custom_place}'. Using preset region.")
+
+        if cached_bbox:
+            ts_bbox        = cached_bbox
+            ts_region_name = ts_custom_place.strip()
+            st.caption(f"📍 {ts_region_name}")
+
+    # GEE status — compact caption so it doesn't dominate the page
+    if gee_available:
+        st.caption("🟢 GEE connected — live data active.")
     else:
-        # Show a static prompt instead of making a live AI call on every render.
-        # Auto-calling AI on every render was causing the app to hang on load.
-        st.caption("Type a question above and click Ask to get an AI response.")
+        st.caption(
+            "🔵 No GEE credentials — showing sample data modeled from MODIS climatology. "
+            "Add GEE_SERVICE_ACCOUNT_JSON to Streamlit secrets to enable live queries."
+        )
 
+    # --- Session state initialisation for Time Series results ---
+    for _k, _v in [
+        ("ts_df",     None), ("ts_stats",   None),
+        ("ts_result_dataset", None), ("ts_result_region", None),
+        ("ts_result_start",   None), ("ts_result_end",    None),
+        ("ts_is_sample", True),
+    ]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
 
-# ===========================================================================
-# TAB 2 — Spectral Explorer
-# ===========================================================================
-with tab_spectral:
+    # --- Run Analysis ---
+    # Two-step pattern: button click clears results and queues a run, then
+    # st.rerun() forces a full re-render (blank page). The pending run block
+    # below picks up on the next render and executes the analysis.
+    if run_btn:
+        if not ts_bbox:
+            st.warning("Enter a location first.")
+        elif ts_start_year >= ts_end_year:
+            st.error("Start year must be before end year.")
+        else:
+            # Step 1: clear old results and queue the analysis parameters
+            st.session_state.ts_df        = None
+            st.session_state.ts_ai_result = None
+            st.session_state.ts_pending_run = {
+                "bbox":    ts_bbox,
+                "dataset": ts_dataset,
+                "start":   ts_start_year,
+                "end":     ts_end_year,
+                "region":  ts_region_name,
+            }
+            st.rerun()
+
+    # Step 2: execute the queued analysis (runs on the render AFTER the button click)
+    if st.session_state.get("ts_pending_run"):
+        p = st.session_state.ts_pending_run
+        st.session_state.ts_pending_run = None  # consume the queue entry
+        with st.spinner(f"Fetching {p['dataset']} data for {p['region']}..."):
+            try:
+                if gee_available:
+                    df       = gee_timeseries.extract_time_series_gee(
+                        p["bbox"], p["dataset"], p["start"], p["end"]
+                    )
+                    is_sample = False
+                else:
+                    df       = gee_timeseries.generate_sample_data(
+                        p["region"], p["dataset"], p["start"], p["end"]
+                    )
+                    is_sample = True
+
+                stats = gee_timeseries.compute_statistics(df, p["dataset"])
+                st.session_state.ts_df             = df
+                st.session_state.ts_stats          = stats
+                st.session_state.ts_result_dataset = p["dataset"]
+                st.session_state.ts_result_region  = p["region"]
+                st.session_state.ts_result_start   = p["start"]
+                st.session_state.ts_result_end     = p["end"]
+                st.session_state.ts_is_sample      = is_sample
+
+                # Reset AI prompt to match the new region and dataset
+                st.session_state.ts_ai_prompt = (
+                    f"Interpret this {p['dataset']} time series for {p['region']} "
+                    f"from {p['start']} to {p['end']}. "
+                    f"Cover: what the data shows, why the pattern exists, "
+                    f"one practical application, and one limitation."
+                )
+                st.success(
+                    f"Analysis complete — {stats['count']} data points, "
+                    f"{p['start']} to {p['end']}."
+                )
+            except Exception as e:
+                st.error(f"Analysis failed: {e}")
+
+    # --- Display results (from session state so they survive widget interactions) ---
+    if st.session_state.ts_df is not None:
+        df      = st.session_state.ts_df
+        stats   = st.session_state.ts_stats
+        r_ds    = st.session_state.ts_result_dataset
+        r_reg   = st.session_state.ts_result_region
+        r_start = st.session_state.ts_result_start
+        r_end   = st.session_state.ts_result_end
+
+        if st.session_state.ts_is_sample:
+            st.caption("Showing sample data. Add GEE credentials to switch to live data.")
+
+        # Reusable thick section divider — heavier than st.divider()
+        def section_break():
+            st.markdown(
+                '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 28px 0 20px 0;">',
+                unsafe_allow_html=True,
+            )
+
+        # --- SECTION 1: Summary metrics ---
+        unit = gee_timeseries.DATASETS[r_ds]["unit"]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Data points", stats["count"])
+        c2.metric(f"Mean {unit}", f"{stats['mean']:.3f}")
+        c3.metric("Trend / year",
+                  f"{stats['slope_per_year']:+.4f} {unit}",
+                  delta_color="normal")
+        c4.metric("Seasonal amplitude", f"{stats['amplitude']:.3f} {unit}")
+
+        section_break()
+
+        # --- SECTION 2: Time series chart ---
+        st.subheader("📈 Time Series")
+        fig_ts = gee_timeseries.build_timeseries_chart(
+            df, stats, r_ds, r_reg, r_start, r_end
+        )
+        st.plotly_chart(fig_ts, use_container_width=True)
+
+        section_break()
+
+        # --- SECTION 3: Seasonal cycle chart + statistics panel ---
+        st.subheader("🗓️ Seasonal Cycle")
+        col_seasonal, col_stats = st.columns([2, 1])
+
+        with col_seasonal:
+            fig_seasonal = gee_timeseries.build_seasonal_chart(stats, r_ds)
+            st.plotly_chart(fig_seasonal, use_container_width=True)
+
+        with col_stats:
+            st.markdown("**Seasonal statistics**")
+            st.markdown(f"- Peak month: **{stats['peak_month']}** ({stats['peak_value']:.3f} {unit})")
+            st.markdown(f"- Trough month: **{stats['trough_month']}** ({stats['trough_value']:.3f} {unit})")
+            st.markdown(f"- Amplitude: **{stats['amplitude']:.3f} {unit}**")
+            st.divider()
+            st.markdown("**Long-term trend**")
+            direction_emoji = "📈" if stats["slope_per_year"] > 0 else "📉"
+            st.markdown(
+                f"{direction_emoji} {stats['trend_direction'].capitalize()} "
+                f"at {stats['slope_per_year']:+.4f} {unit}/year"
+            )
+
+        section_break()
+
+        # --- SECTION 4: Annual means chart ---
+        st.subheader("📊 Annual Comparison")
+        early_boundary  = r_start + max(1, (r_end - r_start) // 4)
+        recent_boundary = r_end   - max(1, (r_end - r_start) // 4)
+
+        # Compute change statistics for the summary panel
+        early_mean  = df[df["date"].dt.year <= early_boundary]["value"].mean()
+        recent_mean = df[df["date"].dt.year >= recent_boundary]["value"].mean()
+        diff_val    = recent_mean - early_mean
+        pct_change  = (diff_val / early_mean * 100) if early_mean != 0 else 0
+
+        col_chart, col_summary = st.columns([3, 1])
+
+        with col_chart:
+            fig_annual = gee_timeseries.build_annual_means_chart(
+                df, r_ds, r_start, r_end, early_boundary, recent_boundary
+            )
+            st.plotly_chart(fig_annual, use_container_width=True)
+
+        with col_summary:
+            st.markdown("**Period comparison**")
+            st.metric(
+                label=f"Early mean ({r_start}–{early_boundary})",
+                value=f"{early_mean:.3f} {unit}",
+            )
+            st.metric(
+                label=f"Recent mean ({recent_boundary}–{r_end})",
+                value=f"{recent_mean:.3f} {unit}",
+                delta=f"{diff_val:+.3f} {unit}",
+            )
+            direction = "increase" if diff_val > 0 else "decrease"
+            emoji     = "🟢" if diff_val > 0 else "🔴"
+            st.markdown(
+                f"{emoji} **{abs(pct_change):.1f}% {direction}** "
+                f"over the full period."
+            )
+
+        section_break()
+
+        # --- SECTION 5: AI Interpretation ---
+        st.subheader("🤖 AI Interpretation")
+        default_prompt = (
+            f"Interpret this {r_ds} time series for {r_reg} "
+            f"from {r_start} to {r_end}. "
+            f"Cover: what the data shows, why the pattern exists, "
+            f"one practical application, and one limitation."
+        )
+        ts_user_prompt = st.text_area(
+            "Edit the prompt before submitting (optional):",
+            value=default_prompt,
+            height=100,
+            key="ts_ai_prompt",
+        )
+        if st.button("Get AI Interpretation", type="primary", key="ts_ai_btn"):
+            with st.spinner("Thinking..."):
+                interpretation = gee_timeseries.get_ai_interpretation(
+                    stats, r_ds, r_reg, r_start, r_end,
+                    custom_prompt=ts_user_prompt,
+                    api_key=config.GROQ_API_KEY or None,
+                )
+                st.session_state.ts_ai_result = interpretation
+
+        if "ts_ai_result" in st.session_state and st.session_state.ts_ai_result:
+            st.markdown(st.session_state.ts_ai_result)
+
+    else:
+        # No analysis run yet — show a prompt to get started
+        st.markdown("---")
+        st.markdown(
+            "**Type a location above, then click Run Analysis.**\n\n"
+            "The module will produce a time series chart, a seasonal cycle chart, "
+            "two comparison maps, and an AI interpretation of what the data shows."
+        )
+
+    # Stop here — do not render the EO Explorer below
+    st.stop()
+
+# ---------------------------------------------------------------------------
+# MODULE 2 — Spectral Explorer (reached only when Spectral Explorer is selected)
+# ---------------------------------------------------------------------------
+
+if selected_module == "🔬 Spectral Explorer":
 
     st.subheader("🔬 Spectral Explorer")
     st.caption(
         "Choose any location, satellite, and band combination. "
         "Fetch real imagery and compare how the same area looks in different spectral views."
     )
+
+    with st.expander("ℹ️ What does this module do?", expanded=False):
+        st.markdown("""
+**This module answers the question: what can satellites see that cameras cannot?**
+
+It fetches real satellite imagery from NASA and ESA archives for any location on Earth
+and lets you render the same scene through different combinations of spectral bands.
+Each combination reveals different physical properties of the ground surface — vegetation
+health, water extent, urban heat, burn scars, soil moisture, and more.
+
+**What you will see after fetching a scene:**
+
+- **Scene timeline** — a chart of all available satellite passes in your date range, scored by how much of your area they cover
+- **Rendered image** — the actual satellite data displayed using your chosen band combination, with a download button
+- **Scene details** — date, cloud cover, satellite, and an explanation of what each channel is measuring
+- **Compare all views** — every available band combination rendered side by side so you can see how the same place looks across the full electromagnetic spectrum
+- **AI explanation** — a plain-language interpretation of what the chosen combination reveals and why
+
+**How to use it:**
+
+1. Choose a satellite from the dropdown
+2. Type any location in the search box
+3. Set a date range and maximum cloud cover
+4. Click Search for scenes
+5. Choose a band combination and click Render
+        """)
 
     # -----------------------------------------------------------------------
     # Initialise all session state keys up front so they always exist.
@@ -863,3 +1168,89 @@ with tab_spectral:
             location_label=c_info["location_label"],
             is_contact_sheet=True,
         )
+
+    # Stop here — do not render the EO Explorer below
+    st.stop()
+
+# ---------------------------------------------------------------------------
+# MODULE 1 — EO Explorer (reached only when EO Explorer is selected)
+# ---------------------------------------------------------------------------
+
+with st.sidebar:
+    st.header("EO Explorer Controls")
+
+    theme_options   = list(data_catalog.THEMES.keys())
+    selected_theme  = st.selectbox("Theme", theme_options)
+
+    location_options   = list(map_builder.LOCATIONS.keys())
+    selected_location  = st.selectbox("Location", location_options)
+
+    dataset_options   = data_catalog.THEMES[selected_theme]["datasets"]
+    selected_dataset  = st.selectbox("Dataset", dataset_options)
+
+    ai_mode_options = [
+        "Explain selected theme",
+        "Explain selected dataset",
+        "Explain business use case",
+        "Explain limitations",
+        "Suggest next analysis",
+    ]
+    selected_ai_mode = st.selectbox("AI Mode", ai_mode_options)
+
+    st.divider()
+    provider_status = ai_assistant.get_provider_status()
+    st.caption(f"AI: **{provider_status}**")
+
+col_map, col_explain = st.columns([3, 2])
+
+with col_map:
+    st.subheader("Interactive Map")
+    fmap = map_builder.build_map(selected_location)
+    st_folium(fmap, use_container_width=True, height=550, returned_objects=[])
+
+with col_explain:
+    st.subheader("Dataset and Theme Overview")
+    theme_data = data_catalog.THEMES[selected_theme]
+    st.markdown(f"**Theme:** {selected_theme}")
+    st.markdown(theme_data["description"])
+    st.divider()
+    dataset_data = data_catalog.DATASETS.get(selected_dataset, {})
+    if dataset_data:
+        st.markdown(f"**Dataset:** {selected_dataset}")
+        st.markdown(f"- **What it measures:** {dataset_data['measures']}")
+        st.markdown(f"- **Sensors:** {dataset_data['sensors']}")
+        st.markdown(f"- **Resolution:** {dataset_data['resolution']}")
+        st.markdown(f"- **Revisit frequency:** {dataset_data['revisit']}")
+        st.markdown(f"- **Typical use cases:** {dataset_data['use_cases']}")
+        st.markdown(f"- **Key limitations:** {dataset_data['limitations']}")
+
+st.divider()
+st.subheader("AI Assistant")
+st.caption(f"Mode: **{selected_ai_mode}** | Provider: **{provider_status}**")
+
+user_question = st.text_input(
+    "Ask a question:",
+    placeholder="e.g. How does Sentinel-2 detect vegetation stress?",
+    key="tab1_question",
+)
+
+if st.button("Ask", type="primary", key="tab1_ask"):
+    if user_question.strip():
+        with st.spinner("Thinking..."):
+            try:
+                response = ai_assistant.ask(
+                    question=user_question,
+                    theme=selected_theme,
+                    dataset=selected_dataset,
+                    location=selected_location,
+                    mode=selected_ai_mode,
+                )
+                st.markdown(response)
+            except Exception as e:
+                st.error(f"AI call failed: {e}")
+    else:
+        st.warning("Type a question before submitting.")
+else:
+    # Show a static prompt instead of making a live AI call on every render.
+    # Auto-calling AI on every render was causing the app to hang on load.
+    st.caption("Type a question above and click Ask to get an AI response.")

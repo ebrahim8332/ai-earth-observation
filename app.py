@@ -354,50 +354,70 @@ if selected_module == "📈 Time Series Explorer":
     # --- Header ---
     st.subheader("📈 Time Series Explorer")
     st.caption(
-        "Select a dataset, region, and year range, then click Run Analysis."
+        "Select a dataset, location, and year range, then click Run Analysis."
     )
 
-    # --- Control row — all inputs in the main area, same pattern as Spectral Explorer ---
-    ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4, ctrl_col5 = st.columns([2, 2, 1, 1, 1], vertical_alignment="bottom")
+    with st.expander("ℹ️ What does this module do?", expanded=False):
+        st.markdown("""
+**This module answers the question: how has this location changed over time?**
 
-    with ctrl_col1:
+It pulls 10+ years of satellite measurements for any location on Earth and shows
+you how a chosen index — vegetation greenness, land surface temperature, or others —
+has shifted across the full period.
+
+**What you will see after running an analysis:**
+
+- **Summary metrics** — mean value, long-term trend per year, and seasonal amplitude at a glance
+- **Time series chart** — every data point plotted across the full date range, with a smoothed trend line and a linear trend overlay
+- **Seasonal cycle chart** — the average pattern by month, showing when values peak and trough across a typical year
+- **Annual comparison chart** — one bar per year, colour-coded to highlight how early years compare to recent years
+- **AI interpretation** — a plain-language explanation of what the data shows, why the pattern exists, and what it means in practice
+
+**How to use it:**
+
+1. Choose a dataset from the dropdown
+2. Type any city, country, or region in the location box
+3. Set the year range
+4. Click Run Analysis
+        """)
+
+    # --- Row 1: Dataset + Location (mirrors Spectral Explorer layout) ---
+    col_ds, col_loc = st.columns([1, 3])
+
+    with col_ds:
         ts_dataset = st.selectbox(
             "Dataset",
             list(gee_timeseries.DATASETS.keys()),
             key="ts_dataset",
         )
 
-    with ctrl_col2:
-        ts_region_preset = st.selectbox(
-            "Preset region",
-            list(gee_timeseries.REGIONS.keys()),
-            key="ts_region_preset",
+    with col_loc:
+        ts_custom_place = st.text_input(
+            "Location — type any city, country, or region",
+            placeholder="e.g. Sahel, West Africa   |   Tanzania   |   Patagonia   |   Fergana Valley",
+            key="ts_custom_place",
         )
 
-    with ctrl_col3:
+    # --- Row 2: Year range + Run button ---
+    yr_col1, yr_col2, yr_col3 = st.columns([1, 1, 1], vertical_alignment="bottom")
+
+    with yr_col1:
         ts_start_year = st.number_input(
             "From year", min_value=2000, max_value=2023,
             value=2014, step=1, key="ts_start_year",
         )
 
-    with ctrl_col4:
+    with yr_col2:
         ts_end_year = st.number_input(
             "To year", min_value=2001, max_value=2024,
             value=2024, step=1, key="ts_end_year",
         )
 
-    with ctrl_col5:
+    with yr_col3:
         run_btn = st.button(
             "▶ Run Analysis", type="primary",
             use_container_width=True, key="ts_run",
         )
-
-    # Custom location text input on its own row, below the main controls
-    ts_custom_place = st.text_input(
-        "Or type any location (overrides preset region above)",
-        placeholder="e.g. Mozambique   |   Fergana Valley, Uzbekistan   |   Patagonia",
-        key="ts_custom_place",
-    )
 
     # Dataset educational info — collapsible, sits just below the controls
     with st.expander("ℹ️ About this dataset", expanded=False):
@@ -415,9 +435,9 @@ if selected_module == "📈 Time Series Explorer":
 
     st.divider()
 
-    # --- Resolve region (custom geocode overrides preset) ---
-    ts_bbox        = gee_timeseries.REGIONS[ts_region_preset]["bbox"]
-    ts_region_name = ts_region_preset
+    # --- Resolve region from typed location ---
+    ts_bbox        = None
+    ts_region_name = ""
 
     if ts_custom_place.strip():
         cached_place = st.session_state.get("ts_geocoded_place", "")
@@ -439,7 +459,7 @@ if selected_module == "📈 Time Series Explorer":
         if cached_bbox:
             ts_bbox        = cached_bbox
             ts_region_name = ts_custom_place.strip()
-            st.caption(f"📍 Custom region: {ts_region_name}")
+            st.caption(f"📍 {ts_region_name}")
 
     # GEE status — compact caption so it doesn't dominate the page
     if gee_available:
@@ -461,38 +481,66 @@ if selected_module == "📈 Time Series Explorer":
             st.session_state[_k] = _v
 
     # --- Run Analysis ---
+    # Two-step pattern: button click clears results and queues a run, then
+    # st.rerun() forces a full re-render (blank page). The pending run block
+    # below picks up on the next render and executes the analysis.
     if run_btn:
-        if ts_start_year >= ts_end_year:
+        if not ts_bbox:
+            st.warning("Enter a location first.")
+        elif ts_start_year >= ts_end_year:
             st.error("Start year must be before end year.")
         else:
-            with st.spinner("Fetching time series data..."):
-                try:
-                    if gee_available:
-                        df = gee_timeseries.extract_time_series_gee(
-                            ts_bbox, ts_dataset, ts_start_year, ts_end_year
-                        )
-                        is_sample = False
-                    else:
-                        df = gee_timeseries.generate_sample_data(
-                            ts_region_name, ts_dataset, ts_start_year, ts_end_year
-                        )
-                        is_sample = True
+            # Step 1: clear old results and queue the analysis parameters
+            st.session_state.ts_df        = None
+            st.session_state.ts_ai_result = None
+            st.session_state.ts_pending_run = {
+                "bbox":    ts_bbox,
+                "dataset": ts_dataset,
+                "start":   ts_start_year,
+                "end":     ts_end_year,
+                "region":  ts_region_name,
+            }
+            st.rerun()
 
-                    stats = gee_timeseries.compute_statistics(df, ts_dataset)
-                    st.session_state.ts_df              = df
-                    st.session_state.ts_stats           = stats
-                    st.session_state.ts_result_dataset  = ts_dataset
-                    st.session_state.ts_result_region   = ts_region_name
-                    st.session_state.ts_result_start    = ts_start_year
-                    st.session_state.ts_result_end      = ts_end_year
-                    st.session_state.ts_is_sample       = is_sample
-
-                    st.success(
-                        f"Analysis complete — {stats['count']} data points, "
-                        f"{ts_start_year} to {ts_end_year}."
+    # Step 2: execute the queued analysis (runs on the render AFTER the button click)
+    if st.session_state.get("ts_pending_run"):
+        p = st.session_state.ts_pending_run
+        st.session_state.ts_pending_run = None  # consume the queue entry
+        with st.spinner(f"Fetching {p['dataset']} data for {p['region']}..."):
+            try:
+                if gee_available:
+                    df       = gee_timeseries.extract_time_series_gee(
+                        p["bbox"], p["dataset"], p["start"], p["end"]
                     )
-                except Exception as e:
-                    st.error(f"Analysis failed: {e}")
+                    is_sample = False
+                else:
+                    df       = gee_timeseries.generate_sample_data(
+                        p["region"], p["dataset"], p["start"], p["end"]
+                    )
+                    is_sample = True
+
+                stats = gee_timeseries.compute_statistics(df, p["dataset"])
+                st.session_state.ts_df             = df
+                st.session_state.ts_stats          = stats
+                st.session_state.ts_result_dataset = p["dataset"]
+                st.session_state.ts_result_region  = p["region"]
+                st.session_state.ts_result_start   = p["start"]
+                st.session_state.ts_result_end     = p["end"]
+                st.session_state.ts_is_sample      = is_sample
+
+                # Reset AI prompt to match the new region and dataset
+                st.session_state.ts_ai_prompt = (
+                    f"Interpret this {p['dataset']} time series for {p['region']} "
+                    f"from {p['start']} to {p['end']}. "
+                    f"Cover: what the data shows, why the pattern exists, "
+                    f"one practical application, and one limitation."
+                )
+                st.success(
+                    f"Analysis complete — {stats['count']} data points, "
+                    f"{p['start']} to {p['end']}."
+                )
+            except Exception as e:
+                st.error(f"Analysis failed: {e}")
 
     # --- Display results (from session state so they survive widget interactions) ---
     if st.session_state.ts_df is not None:
@@ -557,45 +605,42 @@ if selected_module == "📈 Time Series Explorer":
 
         section_break()
 
-        # --- SECTION 4: Comparison maps ---
-        st.subheader("🗺️ Comparison Maps")
-        early_boundary = r_start + max(1, (r_end - r_start) // 4)
-        recent_boundary = r_end - max(1, (r_end - r_start) // 4)
+        # --- SECTION 4: Annual means chart ---
+        st.subheader("📊 Annual Comparison")
+        early_boundary  = r_start + max(1, (r_end - r_start) // 4)
+        recent_boundary = r_end   - max(1, (r_end - r_start) // 4)
 
-        with st.spinner("Building maps..."):
-            try:
-                map_early, map_recent, map_diff = gee_timeseries.build_comparison_maps(
-                    ts_bbox, r_reg, r_ds,
-                    early_year=r_start,
-                    recent_year=r_end,
-                )
+        # Compute change statistics for the summary panel
+        early_mean  = df[df["date"].dt.year <= early_boundary]["value"].mean()
+        recent_mean = df[df["date"].dt.year >= recent_boundary]["value"].mean()
+        diff_val    = recent_mean - early_mean
+        pct_change  = (diff_val / early_mean * 100) if early_mean != 0 else 0
 
-                col_m1, col_m2, col_m3 = st.columns(3)
-                with col_m1:
-                    st.caption(f"Early period ({r_start})")
-                    st_folium(map_early, use_container_width=True, height=280,
-                              returned_objects=[], key="ts_map_early")
-                with col_m2:
-                    st.caption(f"Recent period ({r_end})")
-                    st_folium(map_recent, use_container_width=True, height=280,
-                              returned_objects=[], key="ts_map_recent")
-                with col_m3:
-                    st.caption("Difference (recent minus early)")
-                    st_folium(map_diff, use_container_width=True, height=280,
-                              returned_objects=[], key="ts_map_diff")
+        col_chart, col_summary = st.columns([3, 1])
 
-                # Numeric difference shown below the maps since we don't have a GEE diff layer
-                early_mean  = df[df["date"].dt.year <= early_boundary]["value"].mean()
-                recent_mean = df[df["date"].dt.year >= recent_boundary]["value"].mean()
-                diff_val    = recent_mean - early_mean
-                diff_emoji  = "🟢" if diff_val > 0 else "🔴"
-                st.caption(
-                    f"{diff_emoji} Numeric difference: recent mean minus early mean = "
-                    f"{diff_val:+.3f} {unit} "
-                    f"({'increase' if diff_val > 0 else 'decrease'})"
-                )
-            except Exception as e:
-                st.warning(f"Maps could not be rendered: {e}")
+        with col_chart:
+            fig_annual = gee_timeseries.build_annual_means_chart(
+                df, r_ds, r_start, r_end, early_boundary, recent_boundary
+            )
+            st.plotly_chart(fig_annual, use_container_width=True)
+
+        with col_summary:
+            st.markdown("**Period comparison**")
+            st.metric(
+                label=f"Early mean ({r_start}–{early_boundary})",
+                value=f"{early_mean:.3f} {unit}",
+            )
+            st.metric(
+                label=f"Recent mean ({recent_boundary}–{r_end})",
+                value=f"{recent_mean:.3f} {unit}",
+                delta=f"{diff_val:+.3f} {unit}",
+            )
+            direction = "increase" if diff_val > 0 else "decrease"
+            emoji     = "🟢" if diff_val > 0 else "🔴"
+            st.markdown(
+                f"{emoji} **{abs(pct_change):.1f}% {direction}** "
+                f"over the full period."
+            )
 
         section_break()
 
@@ -629,9 +674,9 @@ if selected_module == "📈 Time Series Explorer":
         # No analysis run yet — show a prompt to get started
         st.markdown("---")
         st.markdown(
-            "**Select a dataset and region above, then click Run Analysis.**\n\n"
+            "**Type a location above, then click Run Analysis.**\n\n"
             "The module will produce a time series chart, a seasonal cycle chart, "
-            "three comparison maps, and an AI interpretation of what the data shows."
+            "two comparison maps, and an AI interpretation of what the data shows."
         )
 
     # Stop here — do not render the EO Explorer below
@@ -648,6 +693,32 @@ if selected_module == "🔬 Spectral Explorer":
         "Choose any location, satellite, and band combination. "
         "Fetch real imagery and compare how the same area looks in different spectral views."
     )
+
+    with st.expander("ℹ️ What does this module do?", expanded=False):
+        st.markdown("""
+**This module answers the question: what can satellites see that cameras cannot?**
+
+It fetches real satellite imagery from NASA and ESA archives for any location on Earth
+and lets you render the same scene through different combinations of spectral bands.
+Each combination reveals different physical properties of the ground surface — vegetation
+health, water extent, urban heat, burn scars, soil moisture, and more.
+
+**What you will see after fetching a scene:**
+
+- **Scene timeline** — a chart of all available satellite passes in your date range, scored by how much of your area they cover
+- **Rendered image** — the actual satellite data displayed using your chosen band combination, with a download button
+- **Scene details** — date, cloud cover, satellite, and an explanation of what each channel is measuring
+- **Compare all views** — every available band combination rendered side by side so you can see how the same place looks across the full electromagnetic spectrum
+- **AI explanation** — a plain-language interpretation of what the chosen combination reveals and why
+
+**How to use it:**
+
+1. Choose a satellite from the dropdown
+2. Type any location in the search box
+3. Set a date range and maximum cloud cover
+4. Click Search for scenes
+5. Choose a band combination and click Render
+        """)
 
     # -----------------------------------------------------------------------
     # Initialise all session state keys up front so they always exist.

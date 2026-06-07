@@ -2,6 +2,7 @@ streamlit
 streamlit-folium
 folium
 numpy
+pandas
 plotly
 pillow
 requests
@@ -10,3 +11,4 @@ pystac-client
 planetary-computer
 groq
 google-genai
+earthengine-api
