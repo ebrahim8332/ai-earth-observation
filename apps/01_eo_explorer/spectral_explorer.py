@@ -32,11 +32,9 @@ import ai_assistant
 # Planetary Computer STAC API endpoint
 PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 
-# Rendering API endpoints.
-# /preview renders the full item tile (100 km × 100 km for Sentinel-2).
-# /crop/{minx},{miny},{maxx},{maxy}.png clips to a geographic bbox.
-PC_RENDER_URL      = "https://planetarycomputer.microsoft.com/api/data/v1/item/preview"
-PC_RENDER_BASE_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item"
+# Rendering API endpoint — renders the full item tile (100 km × 100 km for Sentinel-2).
+# Geographic clipping is done locally after fetching using _clip_to_bbox().
+PC_RENDER_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item/preview"
 
 
 # ---------------------------------------------------------------------------
@@ -135,8 +133,8 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
     - Crop to valid (non-black) region
 
     bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
-    When provided, the API renders only that geographic extent instead of
-    the full Sentinel-2 tile (100 km × 100 km).
+    When provided, the full tile is fetched then clipped locally using
+    the item's known geographic extent. No undocumented API endpoints used.
     """
     sat     = satellite_catalog.SATELLITES[satellite_key]
     rescale = sat["rescale"]
@@ -162,26 +160,23 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
     if gamma:
         params.append(("color_formula", gamma))
 
-    # Choose the correct endpoint.
-    # /preview renders the full item tile (100 km × 100 km for Sentinel-2).
-    # /crop/{minx},{miny},{maxx},{maxy}.png clips the render to the geographic bbox.
-    # The bbox goes into the URL path — the API ignores bbox as a query param.
-    if bbox:
-        crop = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
-        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}.png"
-    else:
-        render_url = PC_RENDER_URL
-
     try:
-        resp = requests.get(render_url, params=params, timeout=60)
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
         if resp.status_code != 200:
             return None
 
         img = Image.open(BytesIO(resp.content)).convert("RGB")
         arr = np.array(img)
 
-        # Crop to the region with actual data (removes black nodata borders)
-        arr = _crop_to_valid(arr)
+        if bbox:
+            # Clip locally: use the item's known geographic extent to compute
+            # which pixel rows and columns correspond to the desired bbox.
+            # This avoids relying on any undocumented API crop endpoint.
+            arr = _clip_to_bbox(arr, item.bbox, bbox)
+        else:
+            # Remove black nodata borders from full-tile renders.
+            arr = _crop_to_valid(arr)
+
         return arr
 
     except Exception:
@@ -220,19 +215,17 @@ def render_ndvi(item, satellite_key: str, width: int = 600,
         ("height",        str(width)),
     ]
 
-    if bbox:
-        crop = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
-        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}.png"
-    else:
-        render_url = PC_RENDER_URL
-
     try:
-        resp = requests.get(render_url, params=params, timeout=60)
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
         if resp.status_code != 200:
             return None
         img = Image.open(BytesIO(resp.content)).convert("RGB")
         arr = np.array(img)
-        return _crop_to_valid(arr)
+        if bbox:
+            arr = _clip_to_bbox(arr, item.bbox, bbox)
+        else:
+            arr = _crop_to_valid(arr)
+        return arr
     except Exception:
         return None
 
@@ -266,19 +259,17 @@ def render_ndwi(item, satellite_key: str, width: int = 600,
         ("height",        str(width)),
     ]
 
-    if bbox:
-        crop = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
-        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}.png"
-    else:
-        render_url = PC_RENDER_URL
-
     try:
-        resp = requests.get(render_url, params=params, timeout=60)
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
         if resp.status_code != 200:
             return None
         img = Image.open(BytesIO(resp.content)).convert("RGB")
         arr = np.array(img)
-        return _crop_to_valid(arr)
+        if bbox:
+            arr = _clip_to_bbox(arr, item.bbox, bbox)
+        else:
+            arr = _crop_to_valid(arr)
+        return arr
     except Exception:
         return None
 
@@ -454,6 +445,50 @@ def explain_combination(r_band: str, g_band: str, b_band: str,
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _clip_to_bbox(arr: np.ndarray, item_bbox: list, clip_bbox: list) -> np.ndarray:
+    """
+    Clip a rendered satellite image array to a geographic sub-bbox.
+
+    The PC Render API returns the full item tile. This function converts the
+    desired geographic bbox into pixel row/column positions within the image
+    and crops to that section.
+
+    arr:       numpy H×W×3 array (the full rendered tile from the API)
+    item_bbox: [west, south, east, north] of the full tile — from item.bbox
+    clip_bbox: [west, south, east, north] of the desired clip area
+
+    Returns the cropped array. Returns the original array if the clip bbox
+    is outside the item extent or produces a zero-size result.
+    """
+    h, w = arr.shape[:2]
+
+    item_west, item_south, item_east, item_north = item_bbox
+    clip_west, clip_south, clip_east, clip_north = clip_bbox
+
+    lon_span = item_east  - item_west
+    lat_span = item_north - item_south
+
+    if lon_span <= 0 or lat_span <= 0:
+        return arr
+
+    # x (column) increases eastward; y (row) increases southward in image coords
+    x0 = int((clip_west  - item_west)  / lon_span * w)
+    x1 = int((clip_east  - item_west)  / lon_span * w)
+    y0 = int((item_north - clip_north) / lat_span * h)
+    y1 = int((item_north - clip_south) / lat_span * h)
+
+    # Clamp to image bounds
+    x0 = max(0, min(x0, w - 1))
+    x1 = max(0, min(x1, w))
+    y0 = max(0, min(y0, h - 1))
+    y1 = max(0, min(y1, h))
+
+    if x1 <= x0 or y1 <= y0:
+        return arr
+
+    return arr[y0:y1, x0:x1]
+
 
 def _crop_to_valid(arr: np.ndarray, threshold: int = 5) -> np.ndarray:
     """
