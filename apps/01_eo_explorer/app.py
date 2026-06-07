@@ -1897,8 +1897,8 @@ if selected_module == "🔍 AI Imagery Interpreter":
 
     st.subheader("🔍 AI Imagery Interpreter")
     st.caption(
-        "Pick a location and a date. The module fetches a Sentinel-2 true-color "
-        "image and asks a vision AI to describe what it sees."
+        "Pick a location and a date range. The module finds the best available "
+        "Sentinel-2 scene in that window and asks a vision AI to describe what it sees."
     )
 
     with st.expander("ℹ️ What does this module do?", expanded=False):
@@ -1922,9 +1922,15 @@ could inform in a real-world context.
 **How to use it:**
 
 1. Type any location in the search box
-2. Pick a target date (the module searches ±30 days for the best available scene)
-3. Click Analyse
-4. Wait 15-30 seconds while the chip is fetched and interpreted
+2. Set a date range — this is the window searched for cloud-free Sentinel-2 scenes
+3. The module picks the best available scene within your range (lowest cloud cover, best coverage)
+4. Click Analyse
+5. Wait 15-30 seconds while the chip is fetched and interpreted
+
+**Tips for setting the date range:**
+- A 1-3 month window gives enough scenes to find a clean one in most regions
+- Narrow the range when you want a specific season (e.g. June-August for northern summer)
+- Widen the range for persistently cloudy regions (tropics, maritime climates)
 
 **How to read a true-color satellite image:**
 
@@ -1934,12 +1940,12 @@ could inform in a real-world context.
 - **Brown or tan** — bare soil, dry grassland, or harvested fields.
 - **Bright white patches** — clouds or snow and ice.
 
-**Vision chain:** 8 multimodal models in fallback order — 6 Gemini (gemini-2.5-pro first)
+**Vision chain:** 7 multimodal models in fallback order — 5 Gemini (gemini-2.5-flash first)
 then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receive images.
         """)
 
     # --- Controls ---
-    col_loc, col_date = st.columns([3, 1])
+    col_loc, col_d1, col_d2 = st.columns([3, 1, 1])
 
     with col_loc:
         ii_place = st.text_input(
@@ -1948,13 +1954,22 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
             key="ii_place",
         )
 
-    with col_date:
-        ii_date = st.date_input(
-            "Target date",
-            value=_date(2024, 3, 1),
+    with col_d1:
+        ii_date_start = st.date_input(
+            "From date",
+            value=_date(2024, 1, 1),
             min_value=_date(2017, 1, 1),
             max_value=_date.today(),
-            key="ii_date",
+            key="ii_date_start",
+        )
+
+    with col_d2:
+        ii_date_end = st.date_input(
+            "To date",
+            value=_date(2024, 4, 1),
+            min_value=_date(2017, 1, 1),
+            max_value=_date.today(),
+            key="ii_date_end",
         )
 
     _, col_run = st.columns([4, 1])
@@ -2007,15 +2022,18 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
     if ii_run_btn:
         if not ii_bbox:
             st.warning("Enter a location first.")
+        elif ii_date_start >= ii_date_end:
+            st.error("From date must be before To date.")
         else:
             st.session_state.ii_image_arr    = None
             st.session_state.ii_metadata     = None
             st.session_state.ii_ai_result    = None
             st.session_state.ii_ai_model     = None
             st.session_state.ii_pending_run  = {
-                "bbox":   ii_bbox,
-                "date":   str(ii_date),
-                "region": ii_region_name,
+                "bbox":       ii_bbox,
+                "date_start": str(ii_date_start),
+                "date_end":   str(ii_date_end),
+                "region":     ii_region_name,
             }
             st.rerun()
 
@@ -2023,13 +2041,14 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
         p = st.session_state.ii_pending_run
         st.session_state.ii_pending_run = None
 
-        with st.spinner(f"Searching Planetary Computer for {p['region']} near {p['date']}..."):
-            arr, metadata = imagery_interpreter.fetch_chip(p["bbox"], p["date"])
+        with st.spinner(f"Searching Planetary Computer for {p['region']} ({p['date_start']} to {p['date_end']})..."):
+            arr, metadata = imagery_interpreter.fetch_chip(p["bbox"], p["date_start"], p["date_end"])
 
         if arr is None:
             st.error(
-                f"No Sentinel-2 scene found for {p['region']} within 30 days of {p['date']}. "
-                "Try a different date or a location with less persistent cloud cover."
+                f"No Sentinel-2 scene found for {p['region']} between "
+                f"{p['date_start']} and {p['date_end']}. "
+                "Try widening the date range or increasing cloud cover tolerance."
             )
         else:
             st.session_state.ii_image_arr    = arr

@@ -23,7 +23,7 @@ No duplication of STAC search or COG rendering code.
 
 import io
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import numpy as np
 import streamlit as st
@@ -82,23 +82,25 @@ Image date: {date}
 # Fetch
 # ---------------------------------------------------------------------------
 
-def fetch_chip(bbox: list, date_str: str) -> tuple:
+def fetch_chip(bbox: list, date_start: str, date_end: str) -> tuple:
     """
     Fetch the best available Sentinel-2 true-color chip from Planetary Computer.
 
-    Searches a 60-day window centred on date_str (±30 days). Picks the scene
-    with the best spatial coverage and cloud cover below 20%.
-    Falls back to 50% cloud tolerance if no clean scene is found.
+    Searches the explicit date range set by the user. No hidden search window.
+    Picks the scene with the best spatial coverage and cloud cover below 20%.
+    Falls back to 50% cloud tolerance if no clean scene is found in the range.
+
+    Args:
+        bbox:       [min_lon, min_lat, max_lon, max_lat]
+        date_start: start of search window, YYYY-MM-DD
+        date_end:   end of search window, YYYY-MM-DD
 
     Returns:
         (image_array, metadata) where image_array is a uint8 numpy H×W×3 array
         and metadata is a dict with keys: date, cloud_cover, scene_id.
         Returns (None, None) if no usable scene is found.
     """
-    target = datetime.strptime(date_str, "%Y-%m-%d")
-    start  = (target - timedelta(days=30)).strftime("%Y-%m-%d")
-    end    = (target + timedelta(days=30)).strftime("%Y-%m-%d")
-    date_range = f"{start}/{end}"
+    date_range = f"{date_start}/{date_end}"
 
     try:
         catalog = spectral_explorer.get_catalog()
