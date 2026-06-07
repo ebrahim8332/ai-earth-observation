@@ -32,8 +32,11 @@ import ai_assistant
 # Planetary Computer STAC API endpoint
 PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 
-# Rendering API endpoint
-PC_RENDER_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item/preview"
+# Rendering API endpoints.
+# /preview renders the full item tile (100 km × 100 km for Sentinel-2).
+# /crop/{minx},{miny},{maxx},{maxy}/preview.png clips to a geographic bbox.
+PC_RENDER_URL      = "https://planetarycomputer.microsoft.com/api/data/v1/item/preview"
+PC_RENDER_BASE_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item"
 
 
 # ---------------------------------------------------------------------------
@@ -156,17 +159,21 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
         ("height",     str(width)),
     ]
 
-    # Clip the render to the user's bbox when provided.
-    # Format: "min_lon,min_lat,max_lon,max_lat" (west, south, east, north).
-    # Without this, the API returns the full 100 km × 100 km Sentinel-2 tile.
-    if bbox:
-        params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
-
     if gamma:
         params.append(("color_formula", gamma))
 
+    # Choose the correct endpoint.
+    # /preview returns the full item tile (100 km × 100 km for Sentinel-2).
+    # /crop/{bbox}/preview.png clips the render to the specified geographic extent.
+    # The bbox goes into the URL path, not a query param — the API ignores bbox query params.
+    if bbox:
+        crop = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}/preview.png"
+    else:
+        render_url = PC_RENDER_URL
+
     try:
-        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        resp = requests.get(render_url, params=params, timeout=60)
         if resp.status_code != 200:
             return None
 
@@ -214,10 +221,13 @@ def render_ndvi(item, satellite_key: str, width: int = 600,
     ]
 
     if bbox:
-        params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
+        crop = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}/preview.png"
+    else:
+        render_url = PC_RENDER_URL
 
     try:
-        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        resp = requests.get(render_url, params=params, timeout=60)
         if resp.status_code != 200:
             return None
         img = Image.open(BytesIO(resp.content)).convert("RGB")
@@ -257,10 +267,13 @@ def render_ndwi(item, satellite_key: str, width: int = 600,
     ]
 
     if bbox:
-        params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
+        crop = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}/preview.png"
+    else:
+        render_url = PC_RENDER_URL
 
     try:
-        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        resp = requests.get(render_url, params=params, timeout=60)
         if resp.status_code != 200:
             return None
         img = Image.open(BytesIO(resp.content)).convert("RGB")
