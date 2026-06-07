@@ -35,7 +35,7 @@ from streamlit_folium import st_folium
 _KM_PER_DEG_LAT = 111.0  # approximately constant globally
 
 
-def _km_to_half_deg(km: float, centre_lat: float) -> tuple:
+def _km_to_half_deg(km, centre_lat):
     """
     Convert a km radius to half-side degrees for lat and lon.
 
@@ -52,7 +52,7 @@ def _km_to_half_deg(km: float, centre_lat: float) -> tuple:
     return lat_half, lon_half
 
 
-def _build_bbox(lat: float, lon: float, size_km: float) -> list:
+def _build_bbox(lat, lon, size_km):
     """
     Build a [min_lon, min_lat, max_lon, max_lat] bbox centred on (lat, lon).
     size_km is the full side length — the bbox is size_km × size_km.
@@ -71,10 +71,10 @@ def _build_bbox(lat: float, lon: float, size_km: float) -> list:
 # ---------------------------------------------------------------------------
 
 def render_map_picker(
-    centre_bbox:     list,
-    picker_key:      str,
-    default_size_km: int = 50,
-) -> list | None:
+    centre_bbox,
+    picker_key,
+    default_size_km = 50,
+):
     """
     Render a click-to-set-location Folium map with a size slider.
 
@@ -207,7 +207,7 @@ def render_map_picker(
 # Helper: clear click state for a module (call when location text changes)
 # ---------------------------------------------------------------------------
 
-def clear_click(picker_key: str) -> None:
+def clear_click(picker_key):
     """
     Clear the stored map click for a module.
     Call this when the user types a new location so the old map click
