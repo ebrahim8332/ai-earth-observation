@@ -341,8 +341,11 @@ def extract_time_series_gee(bbox, dataset_key, start_year, end_year):
             # BurnDate > 0 means that pixel burned this month.
             # Convert to a binary 0/1 band. Taking the mean over a region
             # then gives the fraction of pixels that burned.
+            # copyProperties carries system:time_start to the new image —
+            # without it, ee.Date(image.get("system:time_start")) returns null
+            # and the extract_mean function crashes.
             burned = image.select("BurnDate").gt(0).rename("burned").toFloat()
-            return burned
+            return burned.copyProperties(image, ["system:time_start", "system:index"])
 
         collection = (
             ee.ImageCollection(dataset["collection"])
