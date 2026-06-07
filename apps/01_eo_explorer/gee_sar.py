@@ -29,7 +29,7 @@ SAR_COLLECTION   = "COPERNICUS/S1_GRD"
 INSTRUMENT_MODE  = "IW"            # Interferometric Wide swath — standard land mode
 DEFAULT_SCALE    = 100             # metres — used for statistics reduction
 WINDOW_DAYS      = 10              # days either side of target date to search
-MIN_BBOX_DEG     = 0.2             # minimum bbox side in degrees (~15 km)
+MIN_BBOX_DEG     = 0.35            # minimum bbox side in degrees (~25 km)
                                    # smaller bboxes produce single-pixel blowups
 
 # ---------------------------------------------------------------------------

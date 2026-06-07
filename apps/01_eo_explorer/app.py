@@ -1229,7 +1229,7 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
     with col_loc:
         sar_place = st.text_input(
             "Location — port, city, coastline, or river delta (not a whole country)",
-            placeholder="e.g. Port of Rotterdam   |   Lagos harbour   |   Ganges delta   |   Singapore Strait",
+            placeholder="e.g. Maasvlakte Rotterdam   |   Lagos harbour   |   Ganges delta   |   Singapore Strait",
             key="sar_place",
         )
 
