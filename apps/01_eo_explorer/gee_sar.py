@@ -339,12 +339,18 @@ def build_stats_chart(stats1, stats2, date1_str, date2_str):
 # ---------------------------------------------------------------------------
 
 def get_sar_interpretation(stats1, stats2, date1_str, date2_str,
-                            location_name, api_key=None):
+                            location_name, api_key=None,
+                            groq_key="", gemini_key=""):
     """Plain-language interpretation of the SAR backscatter analysis.
 
-    Tries Groq first if an API key is available.
+    Tries the full AI provider chain (Gemini first, then Groq) via ai_chain.
     Falls back to the substantive text adapted from notebook Cell 10.
+
+    Accepts both old-style api_key (Groq only) and new-style groq_key/gemini_key
+    for backwards compatibility during the transition.
     """
+    if api_key and not groq_key:
+        groq_key = api_key
     vv_change = stats2["VV_mean"] - stats1["VV_mean"]
     vh_change = stats2["VH_mean"] - stats1["VH_mean"]
 
@@ -364,35 +370,20 @@ def get_sar_interpretation(stats1, stats2, date1_str, date2_str,
         f"These images were acquired regardless of weather conditions."
     )
 
-    if api_key:
-        try:
-            from groq import Groq
-            client   = Groq(api_key=api_key)
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a SAR remote sensing analyst. "
-                            "Explain SAR analysis results in plain language for a "
-                            "technical but non-specialist audience. "
-                            "Cover: what the backscatter values indicate about "
-                            "surface types, what changed between the two dates, "
-                            "one practical application, and one key limitation of SAR."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Interpret this Sentinel-1 SAR analysis:\n\n{context}",
-                    },
-                ],
-                max_tokens=600,
-                temperature=0.3,
-            )
-            return response.choices[0].message.content
-        except Exception:
-            pass   # fall through to substantive fallback
+    if groq_key or gemini_key:
+        import ai_chain
+        full_prompt = (
+            "You are a SAR remote sensing analyst. "
+            "Explain SAR analysis results in plain language for a "
+            "technical but non-specialist audience. "
+            "Cover: what the backscatter values indicate about "
+            "surface types, what changed between the two dates, "
+            "one practical application, and one key limitation of SAR.\n\n"
+            f"Interpret this Sentinel-1 SAR analysis:\n\n{context}"
+        )
+        text, model = ai_chain.complete(full_prompt, groq_key=groq_key, gemini_key=gemini_key)
+        if text:
+            return text
 
     return _sar_fallback(stats1, stats2, date1_str, date2_str,
                          location_name, vv_change, vh_change)

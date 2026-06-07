@@ -678,7 +678,8 @@ has shifted across the full period.
                 interpretation = gee_timeseries.get_ai_interpretation(
                     stats, r_ds, r_reg, r_start, r_end,
                     custom_prompt=ts_user_prompt,
-                    api_key=config.GROQ_API_KEY or None,
+                    groq_key=config.GROQ_API_KEY,
+                    gemini_key=config.GEMINI_API_KEY,
                 )
                 st.session_state.ts_ai_result = interpretation
 
@@ -1476,7 +1477,8 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
             with st.spinner("Thinking..."):
                 interpretation = gee_sar.get_sar_interpretation(
                     stats1, stats2, r_d1, r_d2, r_reg,
-                    api_key=config.GROQ_API_KEY or None,
+                    groq_key=config.GROQ_API_KEY,
+                    gemini_key=config.GEMINI_API_KEY,
                 )
                 st.session_state.sar_ai_result = interpretation
 
@@ -1675,7 +1677,7 @@ in the top-right corner of the map.
         ("cd_map",           None), ("cd_stats",         None),
         ("cd_result_region", None), ("cd_result_date1",  None),
         ("cd_result_date2",  None), ("cd_result_src1",   None),
-        ("cd_result_src2",   None), ("cd_ai_result",     None),
+        ("cd_result_src2",   None), ("cd_ai_result",     None), ("cd_ai_model", None),
     ]:
         if _k not in st.session_state:
             st.session_state[_k] = _v
@@ -1854,17 +1856,24 @@ in the top-right corner of the map.
         st.subheader("🤖 AI Interpretation")
         if st.button("Get AI Interpretation", type="primary", key="cd_ai_btn"):
             with st.spinner("Thinking..."):
-                interpretation = gee_change.get_change_interpretation(
+                interpretation, model_used = gee_change.get_change_interpretation(
                     stats,
                     r_d1, r_d2, r_reg,
                     st.session_state.cd_result_src1,
                     st.session_state.cd_result_src2,
-                    api_key=config.GROQ_API_KEY or None,
+                    groq_key=config.GROQ_API_KEY,
+                    gemini_key=config.GEMINI_API_KEY,
                 )
                 st.session_state.cd_ai_result = interpretation
+                st.session_state.cd_ai_model  = model_used
 
         if st.session_state.get("cd_ai_result"):
             st.markdown(st.session_state.cd_ai_result)
+            model_used = st.session_state.get("cd_ai_model")
+            if model_used:
+                st.caption(f"AI response from **{model_used}**")
+            else:
+                st.caption("Showing built-in fallback interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
 
     else:
         st.markdown("---")

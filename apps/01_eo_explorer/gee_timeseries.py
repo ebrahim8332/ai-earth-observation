@@ -882,13 +882,20 @@ def build_comparison_maps(bbox, region_name, dataset_key, early_year, recent_yea
 # ---------------------------------------------------------------------------
 
 def get_ai_interpretation(stats, dataset_key, region_name, start_year, end_year,
-                           custom_prompt=None, api_key=None):
+                           custom_prompt=None, api_key=None,
+                           groq_key="", gemini_key=""):
     """Get a plain-language interpretation of the time series results.
 
-    Tries Groq first if an API key is available.
+    Tries the full AI provider chain (Gemini first, then Groq) via ai_chain.
     Falls back to substantive region- and dataset-specific text.
     Same AI pattern as notebooks/02_gee_ndvi_timeseries.ipynb, Cell 12.
+
+    Accepts both old-style api_key (Groq only) and new-style groq_key/gemini_key
+    for backwards compatibility during the transition.
     """
+    # Support legacy callers that pass api_key= (Groq only)
+    if api_key and not groq_key:
+        groq_key = api_key
     dataset = DATASETS[dataset_key]
     unit    = dataset["unit"]
 
@@ -912,31 +919,19 @@ def get_ai_interpretation(stats, dataset_key, region_name, start_year, end_year,
         else f"Interpret this satellite time series analysis:\n\n{context}"
     )
 
-    if api_key:
-        try:
-            from groq import Groq
-            client   = Groq(api_key=api_key)
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are an Earth observation analyst. "
-                            "Interpret satellite data in plain language. "
-                            "Be specific and direct. Avoid jargon. "
-                            "Cover: what the data shows, why the pattern exists, "
-                            "one practical application, and one limitation."
-                        ),
-                    },
-                    {"role": "user", "content": prompt_text},
-                ],
-                max_tokens=600,
-                temperature=0.3,
-            )
-            return response.choices[0].message.content
-        except Exception:
-            pass   # fall through to the substantive fallback below
+    if groq_key or gemini_key:
+        import ai_chain
+        full_prompt = (
+            "You are an Earth observation analyst. "
+            "Interpret satellite data in plain language. "
+            "Be specific and direct. Avoid jargon. "
+            "Cover: what the data shows, why the pattern exists, "
+            "one practical application, and one limitation.\n\n"
+            + prompt_text
+        )
+        text, model = ai_chain.complete(full_prompt, groq_key=groq_key, gemini_key=gemini_key)
+        if text:
+            return text
 
     return _get_fallback_interpretation(stats, dataset_key, region_name)
 

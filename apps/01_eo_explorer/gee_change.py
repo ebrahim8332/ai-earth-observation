@@ -378,51 +378,56 @@ def build_change_map(img1, img2, bbox, date1_str, date2_str, gee_available):
 # AI interpretation
 # ---------------------------------------------------------------------------
 
-def get_change_interpretation(stats, date1, date2, region, src1, src2, api_key=None):
+def get_change_interpretation(stats, date1, date2, region, src1, src2,
+                               groq_key="", gemini_key=""):
     """Return a plain-language interpretation of the change detection result.
 
-    Calls Groq if api_key is provided. Returns a substantive fallback otherwise.
+    Tries the full AI provider chain (Gemini first, then Groq) via ai_chain.
+    Returns a substantive fallback if no keys are configured or all models fail.
+    Returns a tuple: (interpretation_text, model_name_or_None)
     """
-    if api_key:
-        try:
-            from groq import Groq
-            client = Groq(api_key=api_key)
+    import ai_chain
 
-            ratio_str = f"{stats['gain_loss_ratio']:.2f}" if stats["gain_loss_ratio"] is not None else "N/A (no loss)"
-            prompt = (
-                f"You are an Earth observation analyst. "
-                f"Interpret the following NDVI change detection result for {region}.\n\n"
-                f"Date 1: {date1} (data source: {src1}) — mean NDVI: {stats['mean_ndvi1']:.3f}\n"
-                f"Date 2: {date2} (data source: {src2}) — mean NDVI: {stats['mean_ndvi2']:.3f}\n\n"
-                f"Mean NDVI change: {stats['mean_change']:+.4f}\n"
-                f"Std deviation of change: {stats['std_change']:.4f} (low = uniform/seasonal, high = patchy/human activity)\n"
-                f"Net change: {stats['net_change_km2']:+,.0f} km2 (gain minus loss)\n"
-                f"Gain / Loss ratio: {ratio_str}\n\n"
-                f"Area of significant gain (>{CHANGE_THRESHOLD} NDVI): {stats['area_gain_km2']:,.0f} km2 ({stats['pct_gain']:.1f}%)\n"
-                f"Area of significant loss (<-{CHANGE_THRESHOLD} NDVI): {stats['area_loss_km2']:,.0f} km2 ({stats['pct_loss']:.1f}%)\n"
-                f"Stable area: {stats['area_stable_km2']:,.0f} km2 ({stats['pct_stable']:.1f}%)\n"
-                f"Extreme gain area (>{EXTREME_THRESHOLD} NDVI): {stats['area_extreme_gain_km2']:,.0f} km2\n"
-                f"Extreme loss area (<-{EXTREME_THRESHOLD} NDVI): {stats['area_extreme_loss_km2']:,.0f} km2\n\n"
-                f"Cover the following in 3-4 short paragraphs:\n"
-                f"1. What the numbers show — net greening or browning, and how large is the change.\n"
-                f"2. The most likely causes — consider season, land use, climate, and whether the dates span different seasons.\n"
-                f"3. One practical application — what decision would this data support?\n"
-                f"4. One limitation — what the NDVI difference cannot tell us.\n\n"
-                f"Write in plain language. No bullet points. Be direct."
-            )
+    ratio_str = (
+        f"{stats['gain_loss_ratio']:.2f}"
+        if stats["gain_loss_ratio"] is not None
+        else "N/A (no loss)"
+    )
 
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=600,
-            )
-            return response.choices[0].message.content.strip()
+    prompt = (
+        f"You are an Earth observation analyst. "
+        f"Interpret the following NDVI change detection result for {region}.\n\n"
+        f"Date 1: {date1} (data source: {src1}) — mean NDVI: {stats['mean_ndvi1']:.3f}\n"
+        f"Date 2: {date2} (data source: {src2}) — mean NDVI: {stats['mean_ndvi2']:.3f}\n\n"
+        f"Mean NDVI change: {stats['mean_change']:+.4f}\n"
+        f"Std deviation of change: {stats['std_change']:.4f} "
+        f"(low = uniform/seasonal, high = patchy/human activity)\n"
+        f"Net change: {stats['net_change_km2']:+,.0f} km2 (gain minus loss)\n"
+        f"Gain/Loss ratio: {ratio_str}\n\n"
+        f"Area of significant gain (>{CHANGE_THRESHOLD} NDVI): "
+        f"{stats['area_gain_km2']:,.0f} km2 ({stats['pct_gain']:.1f}%)\n"
+        f"Area of significant loss (<-{CHANGE_THRESHOLD} NDVI): "
+        f"{stats['area_loss_km2']:,.0f} km2 ({stats['pct_loss']:.1f}%)\n"
+        f"Stable area: {stats['area_stable_km2']:,.0f} km2 ({stats['pct_stable']:.1f}%)\n"
+        f"Extreme gain area (>{EXTREME_THRESHOLD} NDVI): "
+        f"{stats['area_extreme_gain_km2']:,.0f} km2\n"
+        f"Extreme loss area (<-{EXTREME_THRESHOLD} NDVI): "
+        f"{stats['area_extreme_loss_km2']:,.0f} km2\n\n"
+        f"Cover the following in 3-4 short paragraphs:\n"
+        f"1. What the numbers show — net greening or browning, and how large the change is.\n"
+        f"2. The most likely causes — consider season, land use, climate, and whether "
+        f"the dates span different seasons.\n"
+        f"3. One practical application — what decision would this data support?\n"
+        f"4. One limitation — what NDVI difference cannot tell us.\n\n"
+        f"Write in plain language. No bullet points. Be direct."
+    )
 
-        except Exception:
-            pass
+    text, model = ai_chain.complete(prompt, groq_key=groq_key, gemini_key=gemini_key)
 
-    # Substantive fallback — useful even without an API key
-    return _fallback_interpretation(stats, date1, date2, region)
+    if text:
+        return text, model
+
+    return _fallback_interpretation(stats, date1, date2, region), None
 
 
 def _fallback_interpretation(stats, date1, date2, region):
