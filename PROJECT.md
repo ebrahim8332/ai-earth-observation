@@ -7,32 +7,47 @@
 
 ## Current Status
 
-**Program day:** 8 complete
-**Phase:** Week 1 complete — Week 2 starting next session
-**Last completed:** Week 1 primer doc; EVI, NDWI, Burned Area added to Time Series Explorer; Landsat performance warning added; all bugs fixed and deployed
-**Next session:** Day 9 — Change Detection module added to the portal (fifth sidebar entry)
+**Program day:** 9 complete
+**Phase:** Week 2 in progress
+**Last completed:** Change Detection portal module — NDVI difference, three-layer Folium change map, 12 summary statistics, 11-model AI fallback chain, portal v1.5 deployed and confirmed working on Zanzibar and Sierra Nevada
+**Next session:** Day 10 — AI Imagery Interpreter portal module (Sentinel-2 chip to Gemini vision)
 
 ---
 
-## Today's Task: Day 9 — Change Detection Module
+## Today's Task: Day 10 — AI Imagery Interpreter
 
-**Goal:** Add Change Detection as the fifth sidebar module in the portal.
-**Location:** apps/01_eo_explorer/ (new file: gee_change.py)
-**Sidebar label:** 🔀 Change Detection
+**Goal:** Add AI Imagery Interpreter as the sixth sidebar module in the portal.
+**Sidebar label:** 🔍 AI Imagery Interpreter
 
 **What it does:**
-User picks a location and two dates. App computes the NDVI difference
-between the two dates using GEE (Sentinel-2 or MODIS). Renders an
-interactive Folium map showing where vegetation increased (green) or
-decreased (red). AI interprets what likely caused the change.
+User picks a location. App fetches a Sentinel-2 true-color chip via Planetary Computer.
+Chip is passed to Gemini vision with a structured prompt. AI returns a plain-language
+interpretation of what the image shows: land cover types, notable features, anomalies.
 
 **Definition of done:**
-- [ ] gee_change.py created with GEE extraction and Folium map builder
-- [ ] Module wired into app.py sidebar as fifth entry
-- [ ] Change map renders correctly for a test location
-- [ ] AI interpretation works with Groq and fallback
+- [ ] Module file created: gee_imagery.py or similar
+- [ ] Wired into app.py as sixth sidebar entry
+- [ ] Gemini vision call works with structured prompt
+- [ ] Substantive fallback if no GEMINI_API_KEY
 - [ ] Deployed to Streamlit Cloud without errors
-- [ ] Committed with message: [day-09] add Change Detection portal module
+- [ ] Committed with message: [day-10] add AI Imagery Interpreter portal module
+
+## Completed: Day 9 — Change Detection Module
+
+- [x] gee_change.py created with GEE extraction and Folium map builder
+- [x] Module wired into app.py sidebar as fifth entry
+- [x] NDVI difference computed (Sentinel-2 with MODIS fallback)
+- [x] Three-layer change map: NDVI Date 1, NDVI Date 2, NDVI diff (default)
+- [x] 12 summary statistics: mean/std change, NDVI baselines, area gain/loss/stable, net change, gain/loss ratio, extreme gain/loss
+- [x] ai_chain.py created — 11-model fallback chain (6 Gemini + 5 Groq), session locking
+- [x] ArcGIS geocoder replaces Nominatim as primary — reliable on shared cloud IPs
+- [x] Grouped GEE reducer pattern — 2 round-trips instead of 5, STATS_SCALE 1000m
+- [x] AI interpretation returns (text, model_name) tuple; model shown below response
+- [x] Substantive fallback if all AI models unavailable
+- [x] gee_timeseries.py and gee_sar.py updated to use ai_chain
+- [x] notebooks/04_change_detection.ipynb committed
+- [x] Portal bumped to v1.5
+- [x] Confirmed working on Zanzibar, Tanzania and Sierra Nevada, California
 
 ---
 
@@ -50,7 +65,7 @@ No standalone apps. Every deliverable is a new sidebar module in the portal.
 | Spectral Explorer | 3 | Live |
 | Time Series Explorer | 6 | Live |
 | SAR Explorer | 7 | Live |
-| Change Detection | 9 | Planned |
+| Change Detection | 9 | Live |
 | AI Imagery Interpreter | 10 | Planned |
 | EO Conversational Assistant | 13 | Planned |
 | Environmental Intelligence | 15 | Planned |
@@ -71,6 +86,7 @@ Update this section as each notebook is committed.
 | 01_stac_query_demo.ipynb | 2 | pending |
 | 02_gee_ndvi_timeseries.ipynb | 4 | complete |
 | 03_sentinel1_sar_basics.ipynb | 5 | complete |
+| 04_change_detection.ipynb | 9 | complete |
 | 04_land_cover_classification.ipynb | 8 | pending |
 | 05_sam_segmentation_demo.ipynb | 11 | pending |
 | 06_prithvi_foundation_model.ipynb | 12 | pending |
@@ -145,7 +161,7 @@ Update the checkbox and add a one-line note after each day is complete.
 
 ### Week 2: Core Analysis and AI Integration
 
-- [ ] Day 9: Change Detection portal module — NDVI difference map, Folium change overlay, AI interpretation
+- [x] Day 9: Change Detection portal module — NDVI difference map, three-layer Folium change overlay, AI interpretation with fallback; notebook committed
 - [ ] Day 10: AI Imagery Interpreter portal module — Sentinel-2 chip to Gemini vision, structured interpretation
 - [ ] Day 11: SAM segmentation notebook
 - [ ] Day 12: Prithvi foundation model notebook (Colab)
