@@ -352,9 +352,14 @@ def extract_time_series_gee(bbox, dataset_key, start_year, end_year):
         )
 
         def extract_burn_fraction(image):
-            # gt(0) turns BurnDate into a binary 0/1 image, band name stays "BurnDate"
-            # mean() over the region = fraction of pixels that burned this month
-            fraction = image.gt(0).reduceRegion(
+            # gt(0): binary 0/1 — 1 where BurnDate > 0 (pixel burned this month)
+            # unmask(0): fill masked pixels (water, clouds, unobserved) with 0
+            #   Without this, reduceRegion(mean) divides only by observed pixels.
+            #   If 95% of pixels are masked and all observed pixels are burned,
+            #   the mean is 1.0 even though most of the area was not on fire.
+            #   unmask(0) makes masked pixels count as "not burned" in the denominator.
+            binary = image.gt(0).unmask(0)
+            fraction = binary.reduceRegion(
                 reducer=ee.Reducer.mean(),
                 geometry=study_area,
                 scale=500,
