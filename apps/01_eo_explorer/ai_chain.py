@@ -96,7 +96,7 @@ def _call_gemini(prompt, model_name, api_key):
     client   = genai.Client(api_key=api_key)
     config   = types.GenerateContentConfig(
         temperature=0.3,
-        max_output_tokens=1024,
+        max_output_tokens=2048,
     )
     response = client.models.generate_content(
         model=model_name,
@@ -120,7 +120,7 @@ def _call_groq(prompt, model_name, api_key):
     response = client.chat.completions.create(
         model=model_name,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=1024,
+        max_tokens=2048,
         temperature=0.3,
     )
     text = response.choices[0].message.content
