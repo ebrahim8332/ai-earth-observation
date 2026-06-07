@@ -10,6 +10,7 @@ v1.3  Day 6:  Spectral Explorer promoted to standalone sidebar module; tabs remo
 v1.4  Day 7:  SAR Explorer added; EO Explorer replaced with Welcome panel
 v1.5  Day 9:  Change Detection module added (fifth sidebar entry)
 v1.6  Day 10: AI Imagery Interpreter added (sixth sidebar entry)
+v1.7  Day 11: Shared map picker added to all five modules
 """
 
 import streamlit as st
@@ -29,6 +30,7 @@ import gee_timeseries
 import gee_sar
 import gee_change
 import imagery_interpreter
+import map_picker
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -461,6 +463,8 @@ has shifted across the full period.
         cached_bbox  = st.session_state.get("ts_geocoded_bbox",  None)
 
         if ts_custom_place.strip() != cached_place:
+            # New location typed — clear any stale map click
+            map_picker.clear_click("ts")
             with st.spinner(f"Looking up '{ts_custom_place}'..."):
                 result_bbox = geocoder.geocode_place(ts_custom_place)
             if result_bbox:
@@ -477,6 +481,20 @@ has shifted across the full period.
             ts_bbox        = cached_bbox
             ts_region_name = ts_custom_place.strip()
             st.caption(f"📍 {ts_region_name}")
+        else:
+            # Location changed and geocode failed — clear stale map click
+            map_picker.clear_click("ts")
+
+    # Map picker — optional override shown once a geocoded centre exists
+    if ts_bbox:
+        with st.expander("📍 Refine location — click map to set exact area", expanded=False):
+            picked = map_picker.render_map_picker(
+                centre_bbox     = ts_bbox,
+                picker_key      = "ts",
+                default_size_km = 100,
+            )
+            if picked:
+                ts_bbox = picked
 
     # GEE status — compact caption so it doesn't dominate the page
     if gee_available:
@@ -786,6 +804,8 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         cached_bbox  = st.session_state.get("se_geocoded_bbox",  None)
 
         if place_input.strip() != cached_place:
+            # New location typed — clear any stale map click
+            map_picker.clear_click("se")
             with st.spinner(f"Looking up '{place_input}'..."):
                 result_bbox = geocoder.geocode_place(place_input)
             if result_bbox:
@@ -807,6 +827,17 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         # Text box is empty — clear any cached geocode result
         st.session_state.se_geocoded_place = ""
         st.session_state.se_geocoded_bbox  = None
+
+    # Map picker — optional override shown once a geocoded centre exists
+    if bbox_se:
+        with st.expander("📍 Refine location — click map to set exact area", expanded=False):
+            picked = map_picker.render_map_picker(
+                centre_bbox     = bbox_se,
+                picker_key      = "se",
+                default_size_km = 50,
+            )
+            if picked:
+                bbox_se = picked
 
     # Clear all search results when the user changes the location.
     # Compare the typed text against what was last searched — not against
@@ -1284,6 +1315,8 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
         cached_bbox  = st.session_state.get("sar_geocoded_bbox",  None)
 
         if sar_place.strip() != cached_place:
+            # New location typed — clear any stale map click
+            map_picker.clear_click("sar")
             with st.spinner(f"Looking up '{sar_place}'..."):
                 result_bbox = geocoder.geocode_place(sar_place)
             if result_bbox:
@@ -1317,6 +1350,17 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
                     f"Try a specific port, harbour, city district, or coastal stretch "
                     f"no wider than {SAR_MAX_KM} km."
                 )
+
+    # Map picker — optional override shown once a geocoded centre exists
+    if sar_bbox:
+        with st.expander("📍 Refine location — click map to set exact area", expanded=False):
+            picked = map_picker.render_map_picker(
+                centre_bbox     = sar_bbox,
+                picker_key      = "sar",
+                default_size_km = 50,
+            )
+            if picked:
+                sar_bbox = picked
 
     # GEE status
     if gee_available:
@@ -1650,6 +1694,8 @@ in the top-right corner of the map.
         cached_bbox  = st.session_state.get("cd_geocoded_bbox",  None)
 
         if cd_place.strip() != cached_place:
+            # New location typed — clear any stale map click
+            map_picker.clear_click("cd")
             with st.spinner(f"Looking up '{cd_place}'..."):
                 result_bbox = geocoder.geocode_place(cd_place)
             if result_bbox:
@@ -1666,6 +1712,17 @@ in the top-right corner of the map.
             cd_bbox        = cached_bbox
             cd_region_name = cd_place.strip()
             st.caption(f"📍 {cd_region_name}")
+
+    # Map picker — optional override shown once a geocoded centre exists
+    if cd_bbox:
+        with st.expander("📍 Refine location — click map to set exact area", expanded=False):
+            picked = map_picker.render_map_picker(
+                centre_bbox     = cd_bbox,
+                picker_key      = "cd",
+                default_size_km = 100,
+            )
+            if picked:
+                cd_bbox = picked
 
     if gee_available:
         st.caption("🟢 GEE connected — live Sentinel-2 / MODIS data active.")
@@ -1988,6 +2045,8 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
         cached_bbox  = st.session_state.get("ii_geocoded_bbox",  None)
 
         if ii_place.strip() != cached_place:
+            # New location typed — clear any stale map click
+            map_picker.clear_click("ii")
             with st.spinner(f"Looking up '{ii_place}'..."):
                 result_bbox = geocoder.geocode_place(ii_place)
             if result_bbox:
@@ -2026,6 +2085,20 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
                     f"Small features like rivers, roads, and fields may not be visible. "
                     f"For better results, try a more specific location within this region."
                 )
+
+    # Map picker — optional override shown once a geocoded centre exists
+    # Especially useful here: eliminates the geocoding ambiguity problem where
+    # descriptive phrases (e.g. "Nile river north of lake victoria") return huge bboxes.
+    if ii_bbox:
+        with st.expander("📍 Refine location — click map to set exact area", expanded=False):
+            picked = map_picker.render_map_picker(
+                centre_bbox     = ii_bbox,
+                picker_key      = "ii",
+                default_size_km = 50,
+            )
+            if picked:
+                ii_bbox = picked
+                ii_region_name = ii_region_name  # keep the typed name as the label
 
     st.caption("🌐 Data source: Sentinel-2 L2A via Planetary Computer (Microsoft). No GEE required.")
     st.divider()
@@ -2256,7 +2329,7 @@ with col_b:
 
 st.divider()
 st.caption(
-    "EOIL Portal v1.6 — Earth Observation Innovation Lab. "
+    "EOIL Portal v1.7 — Earth Observation Innovation Lab. "
     "Built with Claude Code. "
     "Login and access controls will be added in a future version."
 )
