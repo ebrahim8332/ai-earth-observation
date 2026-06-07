@@ -2006,6 +2006,27 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
             area = geocoder.bbox_area_km2(cached_bbox)
             st.caption(f"📍 {ii_region_name} — {area:,.0f} km²")
 
+            # Size warnings — imagery interpretation loses detail above ~25,000 km²
+            # At 600px image width, 25,000 km² = ~8m per pixel (city-level detail lost)
+            if area > 100_000:
+                st.error(
+                    f"**This area is too large for meaningful imagery interpretation.** "
+                    f"{ii_region_name} spans {area:,.0f} km². "
+                    f"At this scale the satellite chip will show an entire country — "
+                    f"individual features are invisible. "
+                    f"Try a city name, a national park, an island, or a specific coastal area. "
+                    f"For river features, search for the nearest town instead "
+                    f"(e.g. 'Jinja, Uganda' for the Nile source at Lake Victoria)."
+                )
+                ii_bbox = None  # block the run
+            elif area > 25_000:
+                st.warning(
+                    f"**Large area — detail will be limited.** "
+                    f"{ii_region_name} spans {area:,.0f} km². "
+                    f"Small features like rivers, roads, and fields may not be visible. "
+                    f"For better results, try a more specific location within this region."
+                )
+
     st.caption("🌐 Data source: Sentinel-2 L2A via Planetary Computer (Microsoft). No GEE required.")
     st.divider()
 
