@@ -109,12 +109,14 @@ Each module has its own files inside apps/01_eo_explorer/.
 The main app.py routes between modules via the sidebar.
 New modules are added per day as new files. The core app does not change.
 
-Current portal modules (app.py v1.4 — grows with each day):
+Current portal modules (app.py v1.6 — grows with each day):
   Module 0 — Welcome panel (default landing page)
   Module 1 — Spectral Explorer (Planetary Computer, optical imagery)
   Module 2 — Time Series Explorer (GEE, MODIS NDVI/EVI/LST/Burned Area, Landsat NDVI/NDWI)
   Module 3 — SAR Explorer (GEE, Sentinel-1 GRD, VV/VH/false color/change map)
-  Module 4 — Change Detection (Day 9, planned)
+  Module 4 — Change Detection (GEE, Sentinel-2/MODIS NDVI diff, three-layer change map)
+  Module 5 — AI Imagery Interpreter (Planetary Computer, Sentinel-2 true-color, 8-model vision chain)
+  Module 6 — EO Conversational Assistant (Day 13, planned)
 
 Architecture rule: no standalone apps. Every new deliverable is a sidebar module
 added to apps/01_eo_explorer/app.py. New logic files go in apps/01_eo_explorer/.

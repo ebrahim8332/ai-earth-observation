@@ -1,14 +1,15 @@
 """
-app.py — EOIL Portal v1.3
+app.py — EOIL Portal v1.6
 Streamlit layout and component wiring only. No business logic here.
 All logic is imported from other modules.
 
-v1.0  Day 1: EO Explorer foundational app
-v1.1  Day 3: Spectral Explorer tab added
-v1.2  Day 6: Time Series Explorer module added; sidebar navigation replaces tab navigation
-v1.3  Day 6: Spectral Explorer promoted to standalone sidebar module; tabs removed
-v1.4  Day 7: SAR Explorer added; EO Explorer replaced with Welcome panel
-v1.5  Day 9: Change Detection module added (fifth sidebar entry)
+v1.0  Day 1:  EO Explorer foundational app
+v1.1  Day 3:  Spectral Explorer tab added
+v1.2  Day 6:  Time Series Explorer module added; sidebar navigation replaces tab navigation
+v1.3  Day 6:  Spectral Explorer promoted to standalone sidebar module; tabs removed
+v1.4  Day 7:  SAR Explorer added; EO Explorer replaced with Welcome panel
+v1.5  Day 9:  Change Detection module added (fifth sidebar entry)
+v1.6  Day 10: AI Imagery Interpreter added (sixth sidebar entry)
 """
 
 import streamlit as st
@@ -27,6 +28,7 @@ import spectral_explorer
 import gee_timeseries
 import gee_sar
 import gee_change
+import imagery_interpreter
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -62,7 +64,7 @@ with st.sidebar:
     st.markdown("### Module")
     selected_module = st.radio(
         "Navigate",
-        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "📡 SAR Explorer", "🔀 Change Detection"],
+        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "📡 SAR Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -1886,6 +1888,227 @@ in the top-right corner of the map.
     st.stop()
 
 # ---------------------------------------------------------------------------
+# MODULE 5 — AI Imagery Interpreter
+# ---------------------------------------------------------------------------
+
+if selected_module == "🔍 AI Imagery Interpreter":
+
+    from datetime import date as _date
+
+    st.subheader("🔍 AI Imagery Interpreter")
+    st.caption(
+        "Pick a location and a date. The module fetches a Sentinel-2 true-color "
+        "image and asks a vision AI to describe what it sees."
+    )
+
+    with st.expander("ℹ️ What does this module do?", expanded=False):
+        st.markdown("""
+**This module answers the question: what does this place look like from space — and what does it mean?**
+
+Every other module in this portal sends numbers and statistics to an AI text model.
+This module sends an actual satellite image to a vision model. The AI reads the picture
+directly — identifying land cover, surface features, seasonal state, and what the image
+could inform in a real-world context.
+
+**What you will see after running an analysis:**
+
+- **Sentinel-2 true-color image** — the actual satellite chip for your location and date,
+  rendered in natural colour (Red=B4, Green=B3, Blue=B2)
+- **Scene metadata** — exact acquisition date, cloud cover, and scene ID
+- **Vision AI interpretation** — 3-4 paragraphs describing land cover types, notable
+  features, ecological state, and potential decision uses
+- **Model attribution** — which model in the 8-model vision chain produced the response
+
+**How to use it:**
+
+1. Type any location in the search box
+2. Pick a target date (the module searches ±30 days for the best available scene)
+3. Click Analyse
+4. Wait 15-30 seconds while the chip is fetched and interpreted
+
+**How to read a true-color satellite image:**
+
+- **Dark to bright green** — healthy vegetation. Dense forest is darker. Crops and grass are lighter.
+- **Dark blue to black** — open water. Deep water absorbs almost all light.
+- **Grey or white** — urban surfaces, bare concrete, or cloud cover.
+- **Brown or tan** — bare soil, dry grassland, or harvested fields.
+- **Bright white patches** — clouds or snow and ice.
+
+**Vision chain:** 8 multimodal models in fallback order — 6 Gemini (gemini-2.5-pro first)
+then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receive images.
+        """)
+
+    # --- Controls ---
+    col_loc, col_date = st.columns([3, 1])
+
+    with col_loc:
+        ii_place = st.text_input(
+            "Location — type any city, region, or ecosystem",
+            placeholder="e.g. Zanzibar   |   Mekong Delta   |   Sahara, Algeria   |   Swiss Alps",
+            key="ii_place",
+        )
+
+    with col_date:
+        ii_date = st.date_input(
+            "Target date",
+            value=_date(2024, 3, 1),
+            min_value=_date(2017, 1, 1),
+            max_value=_date.today(),
+            key="ii_date",
+        )
+
+    _, col_run = st.columns([4, 1])
+    with col_run:
+        ii_run_btn = st.button(
+            "▶ Analyse", type="primary",
+            use_container_width=True, key="ii_run",
+        )
+
+    # --- Geocode ---
+    ii_bbox        = None
+    ii_region_name = ""
+
+    if ii_place.strip():
+        cached_place = st.session_state.get("ii_geocoded_place", "")
+        cached_bbox  = st.session_state.get("ii_geocoded_bbox",  None)
+
+        if ii_place.strip() != cached_place:
+            with st.spinner(f"Looking up '{ii_place}'..."):
+                result_bbox = geocoder.geocode_place(ii_place)
+            if result_bbox:
+                st.session_state.ii_geocoded_place = ii_place.strip()
+                st.session_state.ii_geocoded_bbox  = result_bbox
+                cached_bbox = result_bbox
+            else:
+                st.session_state.ii_geocoded_place = ""
+                st.session_state.ii_geocoded_bbox  = None
+                cached_bbox = None
+                st.error(f"Could not find '{ii_place}'. Try a broader name.")
+
+        if cached_bbox:
+            ii_bbox        = cached_bbox
+            ii_region_name = ii_place.strip()
+            area = geocoder.bbox_area_km2(cached_bbox)
+            st.caption(f"📍 {ii_region_name} — {area:,.0f} km²")
+
+    st.caption("🌐 Data source: Sentinel-2 L2A via Planetary Computer (Microsoft). No GEE required.")
+    st.divider()
+
+    # --- Session state ---
+    for _k, _v in [
+        ("ii_image_arr",    None), ("ii_metadata",       None),
+        ("ii_result_region", None), ("ii_result_date",   None),
+        ("ii_ai_result",    None), ("ii_ai_model",       None),
+    ]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
+
+    # --- Two-step run pattern ---
+    if ii_run_btn:
+        if not ii_bbox:
+            st.warning("Enter a location first.")
+        else:
+            st.session_state.ii_image_arr    = None
+            st.session_state.ii_metadata     = None
+            st.session_state.ii_ai_result    = None
+            st.session_state.ii_ai_model     = None
+            st.session_state.ii_pending_run  = {
+                "bbox":   ii_bbox,
+                "date":   str(ii_date),
+                "region": ii_region_name,
+            }
+            st.rerun()
+
+    if st.session_state.get("ii_pending_run"):
+        p = st.session_state.ii_pending_run
+        st.session_state.ii_pending_run = None
+
+        with st.spinner(f"Searching Planetary Computer for {p['region']} near {p['date']}..."):
+            arr, metadata = imagery_interpreter.fetch_chip(p["bbox"], p["date"])
+
+        if arr is None:
+            st.error(
+                f"No Sentinel-2 scene found for {p['region']} within 30 days of {p['date']}. "
+                "Try a different date or a location with less persistent cloud cover."
+            )
+        else:
+            st.session_state.ii_image_arr    = arr
+            st.session_state.ii_metadata     = metadata
+            st.session_state.ii_result_region = p["region"]
+            st.session_state.ii_result_date   = p["date"]
+
+            # Immediately run vision AI interpretation
+            with st.spinner(f"Asking vision AI to interpret the image of {p['region']}..."):
+                image_bytes = imagery_interpreter.array_to_jpeg_bytes(arr)
+                interpretation, model_used = imagery_interpreter.interpret_image(
+                    image_bytes,
+                    location   = p["region"],
+                    date_str   = metadata["date"],
+                    gemini_key = config.GEMINI_API_KEY,
+                    groq_key   = config.GROQ_API_KEY,
+                )
+
+            if interpretation:
+                st.session_state.ii_ai_result = interpretation
+                st.session_state.ii_ai_model  = model_used
+            else:
+                st.session_state.ii_ai_result = imagery_interpreter.get_fallback_interpretation(
+                    p["region"], metadata["date"]
+                )
+                st.session_state.ii_ai_model  = None
+
+            st.success(
+                f"Scene found: {metadata['date']} — cloud cover {metadata['cloud_cover']:.1f}%"
+            )
+
+    # --- Display results ---
+    if st.session_state.ii_image_arr is not None:
+        arr      = st.session_state.ii_image_arr
+        metadata = st.session_state.ii_metadata
+        r_reg    = st.session_state.ii_result_region
+        r_date   = st.session_state.ii_result_date
+
+        st.subheader("🛰️ Satellite Image")
+
+        col_img, col_interp = st.columns([1, 1])
+
+        with col_img:
+            st.image(
+                arr,
+                caption=(
+                    f"Sentinel-2 true-color — {r_reg} — {metadata['date']} "
+                    f"(cloud {metadata['cloud_cover']:.1f}%)"
+                ),
+                use_container_width=True,
+            )
+            st.markdown("**Scene details**")
+            st.markdown(f"- **Acquired:** {metadata['date']}")
+            st.markdown(f"- **Cloud cover:** {metadata['cloud_cover']:.1f}%")
+            st.markdown(f"- **Sensor:** Sentinel-2 L2A")
+            st.markdown(f"- **Bands:** B4 (Red), B3 (Green), B2 (Blue) — true color")
+            st.markdown(f"- **Scene ID:** `{metadata['scene_id'][:40]}...`")
+
+        with col_interp:
+            st.markdown("**🤖 Vision AI Interpretation**")
+            if st.session_state.ii_ai_result:
+                st.markdown(st.session_state.ii_ai_result)
+                model_used = st.session_state.get("ii_ai_model")
+                if model_used:
+                    st.caption(f"Vision AI response from **{model_used}**")
+                else:
+                    st.caption("Showing built-in reading guide. Add GEMINI_API_KEY or GROQ_API_KEY to enable AI.")
+
+    else:
+        st.markdown("---")
+        st.markdown(
+            "**Type a location above, pick a date, then click Analyse.**\n\n"
+            "The module will find the best available Sentinel-2 scene near your target date "
+            "and ask a vision AI to describe what it sees."
+        )
+
+    st.stop()
+
+# ---------------------------------------------------------------------------
 # MODULE 0 — Welcome panel (default when Welcome is selected)
 # ---------------------------------------------------------------------------
 
@@ -1938,7 +2161,7 @@ with col3:
 
 st.divider()
 
-col4, _ = st.columns([1, 2])
+col4, col5 = st.columns(2)
 
 with col4:
     st.markdown("#### 🔀 Change Detection")
@@ -1950,6 +2173,17 @@ with col4:
     st.markdown("**Sensor:** Sentinel-2 SR, MODIS (fallback)")
     st.markdown("**Data:** Google Earth Engine")
     st.markdown("**Question:** What changed between two dates?")
+
+with col5:
+    st.markdown("#### 🔍 AI Imagery Interpreter")
+    st.markdown(
+        "Pick any location and date. The module fetches a Sentinel-2 true-color chip "
+        "and passes it directly to a vision AI. The AI reads the image and describes "
+        "land cover, notable features, seasonal state, and decision applications."
+    )
+    st.markdown("**Sensor:** Sentinel-2 L2A")
+    st.markdown("**Data:** Planetary Computer (Microsoft)")
+    st.markdown("**Question:** What does this place look like — and what does it mean?")
 
 st.divider()
 
@@ -1977,12 +2211,12 @@ with col_b:
     st.markdown("- Streamlit — app framework")
     st.markdown("- Google Earth Engine — satellite data processing at scale")
     st.markdown("- Planetary Computer — optical satellite archive")
-    st.markdown("- Groq (Llama 3.3 70B) — AI interpretation")
+    st.markdown("- Groq + Gemini — 11-model text chain, 8-model vision chain")
     st.markdown("- Folium / Plotly — interactive maps and charts")
 
 st.divider()
 st.caption(
-    "EOIL Portal v1.5 — Earth Observation Innovation Lab. "
+    "EOIL Portal v1.6 — Earth Observation Innovation Lab. "
     "Built with Claude Code. "
     "Login and access controls will be added in a future version."
 )
