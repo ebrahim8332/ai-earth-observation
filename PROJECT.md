@@ -7,10 +7,10 @@
 
 ## Current Status
 
-**Program day:** 8 in progress
-**Phase:** Week 1 - Orientation and Data Access
-**Last completed:** Week 1 primer document written (docs/learning_notes/week1-primer.md); SAR interactive map fixed for Streamlit Cloud
-**Next session:** Day 8 continued — additional Time Series indices (EVI, NDWI, Burned Area)
+**Program day:** 8 complete
+**Phase:** Week 1 complete — Week 2 starting next session
+**Last completed:** Week 1 primer doc; EVI, NDWI, Burned Area added to Time Series Explorer; Landsat performance warning added; all bugs fixed and deployed
+**Next session:** Day 9 — Change Detection Dashboard (apps/02_change_detection/)
 
 ---
 
@@ -139,7 +139,7 @@ Update the checkbox and add a one-line note after each day is complete.
 - [x] Day 5: Sentinel-1 SAR basics notebook — Rotterdam port, VV/VH/false color, backscatter change map
 - [x] Day 6: GEE Time Series Explorer portal module — MODIS NDVI, LST; Annual Comparison chart; GEE credentials
 - [x] Day 7: SAR Explorer module — Sentinel-1 VV/VH/false color/change map; Welcome panel; bbox size warning
-- [ ] Day 8: Week 1 review and team primer document
+- [x] Day 8: Week 1 primer doc; EVI, NDWI, Burned Area added to Time Series Explorer; Landsat performance warning
 
 ### Week 2: Core Analysis and AI Integration
 
