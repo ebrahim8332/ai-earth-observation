@@ -10,13 +10,9 @@ This module provides:
 - Groq AI interpretation with substantive fallback text
 """
 
-import io
 import math
-import requests
-import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
-from PIL import Image
 
 import config
 
@@ -163,136 +159,99 @@ def get_backscatter_stats(image, bbox):
 
 
 # ---------------------------------------------------------------------------
-# Image download — server-side via getThumbURL
+# Interactive map — GEE tile layers in Folium
 #
-# GEE tile URLs require auth headers the browser cannot send (CORS block).
-# The fix: download images SERVER-SIDE using the service account credentials,
-# then pass numpy arrays to st.image() for display.
-# getThumbURL runs on the GEE server and returns a PNG via a temporary URL
-# that the Streamlit server can fetch with requests.get().
+# GEE's getMapId() returns tile URLs that include a temporary auth token
+# embedded directly in the URL. The browser can fetch these tiles without
+# any special auth headers — the token is all that is needed.
+# This lets us use standard Folium TileLayers for interactive zoom/pan.
+#
+# Each layer is added with show=False except the first, so the map opens
+# with a clean view. The user toggles layers via the Folium LayerControl.
 # ---------------------------------------------------------------------------
 
-def _download_rgb_image(rgb_image, bbox):
-    """Download a pre-visualized GEE image as a numpy RGB array.
+def build_sar_map(image1, image2, bbox, date1_str, date2_str):
+    """Build an interactive Folium map with all SAR layers as GEE tile overlays.
 
-    Uses getThumbURL() with an explicit ee.Geometry.Rectangle region so GEE
-    clips the export to our bbox rather than the full satellite swath (~250km).
+    Layers added (all toggleable via LayerControl in the top right):
+      - VV Polarization — Date 1 and Date 2
+      - VH Polarization — Date 1 and Date 2
+      - False Color composite — Date 1 and Date 2
+      - Change Map (VV Date2 minus Date1)
 
-    Why region matters:
-    - Without region, 'dimensions' is calculated against the entire swath.
-      600px over 250km = 417m/pixel — all local detail is lost.
-    - With region=ee.Geometry.Rectangle(bbox), 600px covers only our area.
-      600px over ~80km = ~133m/pixel — correct for Sentinel-1.
+    VV Date 1 is shown by default. All others start hidden.
 
-    The rgb_image must already be visualized (via .visualize()) before calling.
-    Returns a uint8 numpy array (H x W x 3), or None on failure.
-    """
-    try:
-        import ee
-
-        region = ee.Geometry.Rectangle(bbox)
-
-        url = rgb_image.getThumbURL({
-            "region":     region,
-            "dimensions": 400,        # longest side in pixels — compact display size
-            "format":     "png",
-        })
-
-        response = requests.get(url, timeout=60)
-        if response.status_code != 200:
-            return None
-
-        img = Image.open(io.BytesIO(response.content)).convert("RGB")
-        return np.array(img)
-
-    except Exception:
-        return None
-
-
-def build_sar_views(image1, image2, bbox, date1_str, date2_str):
-    """Download all SAR view images as numpy arrays.
-
-    Uses .visualize() on the GEE server to apply colour rendering, then
-    downloads via getThumbURL with an explicit region so GEE clips to the
-    bbox before resizing. This avoids the browser auth problem (tile URLs
-    require GEE auth headers; getThumbURL produces a plain HTTPS download).
-
-    Structure returned:
-      {
-        "VV Polarization":  {"date1": array, "date2": array},
-        "VH Polarization":  {"date1": array, "date2": array},
-        "False Color":      {"date1": array, "date2": array},
-        "Change Map":       {"single": array},
-      }
-
-    Any failed download returns None for that entry — the UI handles gracefully.
+    Returns a folium.Map object ready for st_folium() display.
+    Returns None if image1 or image2 is None.
     """
     if image1 is None or image2 is None:
-        return {}
+        return None
 
     import ee
+    import folium
 
-    # --- Build derived bands with explicit names ---
-    # .subtract() keeps the first band's name ("VV"), so we rename the ratio
-    # to avoid duplicate band names in the false color stack.
-    vv1   = image1.select("VV")
-    vh1   = image1.select("VH")
-    rat1  = vv1.subtract(vh1).rename("ratio")
-    fc1   = vv1.addBands(vh1).addBands(rat1)   # bands: VV, VH, ratio
+    west, south, east, north = bbox
+    center_lat = (south + north) / 2
+    center_lon = (west  + east)  / 2
 
-    vv2   = image2.select("VV")
-    vh2   = image2.select("VH")
-    rat2  = vv2.subtract(vh2).rename("ratio")
-    fc2   = vv2.addBands(vh2).addBands(rat2)
+    # Base map — OpenStreetMap so the user can orient themselves
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=12)
+    m.fit_bounds([[south, west], [north, east]])
+
+    # --- Build derived bands ---
+    # .subtract() keeps the first band's name ("VV") — rename ratio to avoid
+    # duplicate band names in the false color stack.
+    vv1  = image1.select("VV")
+    vh1  = image1.select("VH")
+    rat1 = vv1.subtract(vh1).rename("ratio")
+    fc1  = vv1.addBands(vh1).addBands(rat1)   # bands: VV, VH, ratio
+
+    vv2  = image2.select("VV")
+    vh2  = image2.select("VH")
+    rat2 = vv2.subtract(vh2).rename("ratio")
+    fc2  = vv2.addBands(vh2).addBands(rat2)
 
     change = vv2.subtract(vv1).rename("change")
 
-    # --- Apply colour rendering server-side using .visualize() ---
-    # This produces a proper 3-band RGB image that getThumbURL can download
-    # without any additional vis params.
-    # Palette colours must not have the '#' prefix for GEE .visualize().
+    # --- Visualization parameters for each layer ---
+    VV_VIS     = {"min": -25, "max": 0,  "palette": ["000000", "ffffff"]}
+    VH_VIS     = {"min": -30, "max": -5, "palette": ["000000", "ffffff"]}
+    FC_VIS     = {"bands": ["VV", "VH", "ratio"],
+                  "min": [-20, -25, 0], "max": [0, -5, 15]}
+    CHANGE_VIS = {"min": -5, "max": 5,
+                  "palette": ["d73027", "fee090", "ffffbf", "e0f3f8", "4575b4"]}
 
-    vv1_rgb = vv1.visualize(min=-25, max=0,  palette=["000000", "ffffff"])
-    vv2_rgb = vv2.visualize(min=-25, max=0,  palette=["000000", "ffffff"])
+    # --- Layer definitions: (gee_image, vis_params, label, show_by_default) ---
+    layers = [
+        (vv1,    VV_VIS,     f"VV — {date1_str}",          True),
+        (vv2,    VV_VIS,     f"VV — {date2_str}",          False),
+        (vh1,    VH_VIS,     f"VH — {date1_str}",          False),
+        (vh2,    VH_VIS,     f"VH — {date2_str}",          False),
+        (fc1,    FC_VIS,     f"False Color — {date1_str}", False),
+        (fc2,    FC_VIS,     f"False Color — {date2_str}", False),
+        (change, CHANGE_VIS, "Change Map (VV)",             False),
+    ]
 
-    vh1_rgb = vh1.visualize(min=-30, max=-5, palette=["000000", "ffffff"])
-    vh2_rgb = vh2.visualize(min=-30, max=-5, palette=["000000", "ffffff"])
+    # --- Add each layer as a Folium TileLayer ---
+    for gee_image, vis_params, name, show in layers:
+        try:
+            map_id   = gee_image.getMapId(vis_params)
+            tile_url = map_id["tile_fetcher"].url_format
+            folium.TileLayer(
+                tiles=tile_url,
+                attr="Google Earth Engine / Copernicus Sentinel-1",
+                name=name,
+                overlay=True,
+                control=True,
+                show=show,
+                opacity=0.9,
+            ).add_to(m)
+        except Exception:
+            pass   # skip layers that fail — map still renders with the rest
 
-    # False color: per-band min/max as lists, bands named explicitly
-    fc1_rgb = fc1.visualize(
-        bands=["VV", "VH", "ratio"],
-        min=[-20, -25, 0],
-        max=[0,   -5,  15],
-    )
-    fc2_rgb = fc2.visualize(
-        bands=["VV", "VH", "ratio"],
-        min=[-20, -25, 0],
-        max=[0,   -5,  15],
-    )
+    folium.LayerControl(collapsed=False).add_to(m)
 
-    # Change map: diverging red-yellow-blue palette
-    change_rgb = change.visualize(
-        min=-5, max=5,
-        palette=["d73027", "fee090", "ffffbf", "e0f3f8", "4575b4"],
-    )
-
-    return {
-        "VV Polarization": {
-            "date1": _download_rgb_image(vv1_rgb,  bbox),
-            "date2": _download_rgb_image(vv2_rgb,  bbox),
-        },
-        "VH Polarization": {
-            "date1": _download_rgb_image(vh1_rgb, bbox),
-            "date2": _download_rgb_image(vh2_rgb, bbox),
-        },
-        "False Color": {
-            "date1": _download_rgb_image(fc1_rgb, bbox),
-            "date2": _download_rgb_image(fc2_rgb, bbox),
-        },
-        "Change Map": {
-            "single": _download_rgb_image(change_rgb, bbox),
-        },
-    }
+    return m
 
 
 # ---------------------------------------------------------------------------

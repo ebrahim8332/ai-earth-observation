@@ -1312,9 +1312,9 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
 
     # --- Session state initialisation ---
     for _k, _v in [
-        ("sar_maps",   None), ("sar_stats1",  None), ("sar_stats2",  None),
+        ("sar_maps",          None), ("sar_stats1",       None), ("sar_stats2", None),
         ("sar_result_region", None), ("sar_result_date1", None),
-        ("sar_result_date2", None),  ("sar_ai_result",    None),
+        ("sar_result_date2",  None), ("sar_ai_result",    None),
     ]:
         if _k not in st.session_state:
             st.session_state[_k] = _v
@@ -1364,10 +1364,10 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
                 stats1 = gee_sar.get_backscatter_stats(img1, eff_bbox)
                 stats2 = gee_sar.get_backscatter_stats(img2, eff_bbox)
 
-            with st.spinner("Downloading SAR images (this takes 20-40 seconds)..."):
-                maps = gee_sar.build_sar_views(img1, img2, eff_bbox, p["date1"], p["date2"])
+            with st.spinner("Building interactive SAR map (this takes 20-40 seconds)..."):
+                sar_map = gee_sar.build_sar_map(img1, img2, eff_bbox, p["date1"], p["date2"])
 
-            st.session_state.sar_maps         = maps
+            st.session_state.sar_maps         = sar_map
             st.session_state.sar_stats1       = stats1
             st.session_state.sar_stats2       = stats2
             st.session_state.sar_result_region = p["region"]
@@ -1435,67 +1435,25 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
 
         sar_section_break()
 
-        # --- SECTION 3: SAR Images ---
-        # Images are downloaded server-side using GEE getThumbURL so the
-        # service account credentials work. Browser never needs to authenticate.
+        # --- SECTION 3: Interactive SAR Map ---
+        # GEE tile URLs include a time-limited auth token in the URL itself.
+        # The browser can fetch them directly — no special headers needed.
+        # This gives us full zoom/pan interactivity via Folium TileLayers.
         st.subheader("🗺️ SAR Views")
 
-        view_captions = {
-            "VV Polarization": (
-                "VV (Vertical transmit, Vertical receive). "
-                "Dark = calm water. Bright = urban areas, ships, metal structures."
-            ),
-            "VH Polarization": (
-                "VH (Vertical transmit, Horizontal receive). "
-                "Brighter than VV over vegetation — responds to volume scattering in canopy."
-            ),
-            "False Color": (
-                "Red = VV, Green = VH, Blue = VV/VH ratio. "
-                "Pink/magenta = urban. Green = vegetation. Dark = water. White = ships."
-            ),
-            "Change Map": (
-                "VV change: Date 2 minus Date 1. "
-                "Blue = backscatter increased (ships arrived, new structures). "
-                "Red = backscatter decreased (ships left, surface smoothed). "
-                "Yellow/white = no change."
-            ),
-        }
+        st.caption(
+            "Toggle layers using the control in the top-right corner of the map. "
+            "VV Date 1 is shown by default. "
+            "**VV** = surface roughness, ships, buildings bright. "
+            "**VH** = vegetation volume bright. "
+            "**False Color** = Red:VV Green:VH Blue:ratio — pink=urban, green=vegetation, dark=water. "
+            "**Change Map** = blue: backscatter increased, red: decreased."
+        )
 
-        if maps:
-            tab_labels = list(maps.keys())
-            map_tabs   = st.tabs(tab_labels)
-
-            for tab, view_name in zip(map_tabs, tab_labels):
-                with tab:
-                    st.caption(view_captions.get(view_name, ""))
-                    view_data = maps[view_name]
-
-                    if view_name == "Change Map":
-                        arr = view_data.get("single")
-                        if arr is not None:
-                            st.image(arr, caption=f"VV change — {r_d1} to {r_d2}",
-                                     width=500)
-                        else:
-                            st.warning("Change map image could not be downloaded.")
-
-                    else:
-                        arr1 = view_data.get("date1")
-                        arr2 = view_data.get("date2")
-                        col_img1, col_img2 = st.columns(2)
-                        with col_img1:
-                            if arr1 is not None:
-                                st.image(arr1, caption=f"Date 1 — {r_d1}",
-                                         width=450)
-                            else:
-                                st.warning(f"Date 1 image failed to download.")
-                        with col_img2:
-                            if arr2 is not None:
-                                st.image(arr2, caption=f"Date 2 — {r_d2}",
-                                         width=450)
-                            else:
-                                st.warning(f"Date 2 image failed to download.")
+        if maps is not None:
+            st_folium(maps, width=700, height=500, returned_objects=[])
         else:
-            st.warning("SAR images could not be downloaded. Check GEE connection.")
+            st.warning("SAR map could not be built. Check GEE connection.")
 
         sar_section_break()
 
