@@ -25,10 +25,13 @@ and build program. It rebuilds my knowledge of satellite data analysis and
 integrates modern AI into every workflow.
 
 The program produces:
-- 12 deployed Streamlit applications
+- 1 deployed Streamlit portal with up to 13 sidebar modules (one URL for everything)
 - 9 documented Jupyter notebooks
 - 5 team education documents
 - A complete GitHub repository usable as a team curriculum
+
+No standalone apps. Every analytical deliverable is a new module added to the
+portal at https://eoil-explorer.streamlit.app. One URL, one experience.
 
 Every application answers at least one of four decision questions:
 1. What is happening?
@@ -106,11 +109,15 @@ Each module has its own files inside apps/01_eo_explorer/.
 The main app.py routes between modules via the sidebar.
 New modules are added per day as new files. The core app does not change.
 
-Current portal modules (app.py v1.4):
+Current portal modules (app.py v1.4 — grows with each day):
   Module 0 — Welcome panel (default landing page)
   Module 1 — Spectral Explorer (Planetary Computer, optical imagery)
-  Module 2 — Time Series Explorer (GEE, MODIS NDVI/LST)
+  Module 2 — Time Series Explorer (GEE, MODIS NDVI/EVI/LST/Burned Area, Landsat NDVI/NDWI)
   Module 3 — SAR Explorer (GEE, Sentinel-1 GRD, VV/VH/false color/change map)
+  Module 4 — Change Detection (Day 9, planned)
+
+Architecture rule: no standalone apps. Every new deliverable is a sidebar module
+added to apps/01_eo_explorer/app.py. New logic files go in apps/01_eo_explorer/.
 
 GEE credentials: stored in apps/01_eo_explorer/.streamlit/secrets.toml (local, gitignored).
 On Streamlit Cloud: add GEE_SERVICE_ACCOUNT_JSON to app secrets dashboard.

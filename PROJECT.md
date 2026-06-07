@@ -10,27 +10,29 @@
 **Program day:** 8 complete
 **Phase:** Week 1 complete — Week 2 starting next session
 **Last completed:** Week 1 primer doc; EVI, NDWI, Burned Area added to Time Series Explorer; Landsat performance warning added; all bugs fixed and deployed
-**Next session:** Day 9 — Change Detection Dashboard (apps/02_change_detection/)
+**Next session:** Day 9 — Change Detection module added to the portal (fifth sidebar entry)
 
 ---
 
-## Today's Task: Day 1 - EO Explorer v1.0
+## Today's Task: Day 9 — Change Detection Module
 
-**Goal:** Build and deploy the foundational application.
-**Location:** apps/01_eo_explorer/
-**Prompt file:** day1-prompt-03-eo-explorer.md
+**Goal:** Add Change Detection as the fifth sidebar module in the portal.
+**Location:** apps/01_eo_explorer/ (new file: gee_change.py)
+**Sidebar label:** 🔀 Change Detection
+
+**What it does:**
+User picks a location and two dates. App computes the NDVI difference
+between the two dates using GEE (Sentinel-2 or MODIS). Renders an
+interactive Folium map showing where vegetation increased (green) or
+decreased (red). AI interprets what likely caused the change.
 
 **Definition of done:**
-- [ ] App runs locally: streamlit run apps/01_eo_explorer/app.py
+- [ ] gee_change.py created with GEE extraction and Folium map builder
+- [ ] Module wired into app.py sidebar as fifth entry
+- [ ] Change map renders correctly for a test location
+- [ ] AI interpretation works with Groq and fallback
 - [ ] Deployed to Streamlit Cloud without errors
-- [ ] Interactive Folium map loads with four sample layers
-- [ ] All six themes selectable, explanation panel updates
-- [ ] AI assistant works in fallback mode with no API key
-- [ ] AI assistant works when GROQ_API_KEY is present
-- [ ] All six module files have inline comments on every function
-- [ ] apps/01_eo_explorer/README.md exists
-- [ ] Committed with message: [day-01] add EO Explorer v1.0 foundational app
-- [ ] Streamlit Cloud URL added to README.md
+- [ ] Committed with message: [day-09] add Change Detection portal module
 
 ---
 
@@ -40,6 +42,7 @@ Update this section as each app goes live.
 
 All modules are deployed as one portal app at https://eoil-explorer.streamlit.app
 Sidebar navigation routes between modules. One URL for everything.
+No standalone apps. Every deliverable is a new sidebar module in the portal.
 
 | Module | Added Day | Status |
 |--------|-----------|--------|
@@ -47,16 +50,15 @@ Sidebar navigation routes between modules. One URL for everything.
 | Spectral Explorer | 3 | Live |
 | Time Series Explorer | 6 | Live |
 | SAR Explorer | 7 | Live |
-| EO Explorer v1.2 (drone) | future | Planned |
 | Change Detection | 9 | Planned |
 | AI Imagery Interpreter | 10 | Planned |
 | EO Conversational Assistant | 13 | Planned |
 | Environmental Intelligence | 15 | Planned |
 | Atmospheric Intelligence | 17 | Planned |
 | Multi-Layer Geospatial | 20 | Planned |
-| EO Decision Support Platform | 24 | _add after deployment_ |
-| EO Vendor Evaluator | 26 | _add after deployment_ |
-| EOIL Curriculum Index | 28 | _add after deployment_ |
+| Decision Support Platform | 24 | Planned |
+| EO Vendor Evaluator | 26 | Planned |
+| EOIL Curriculum Index | 28 | Planned |
 
 ---
 
@@ -143,33 +145,32 @@ Update the checkbox and add a one-line note after each day is complete.
 
 ### Week 2: Core Analysis and AI Integration
 
-- [ ] Day 8: Land cover classification notebook
-- [ ] Day 9: Change Detection Dashboard app
-- [ ] Day 10: AI Imagery Interpreter app
+- [ ] Day 9: Change Detection portal module — NDVI difference map, Folium change overlay, AI interpretation
+- [ ] Day 10: AI Imagery Interpreter portal module — Sentinel-2 chip to Gemini vision, structured interpretation
 - [ ] Day 11: SAM segmentation notebook
 - [ ] Day 12: Prithvi foundation model notebook (Colab)
-- [ ] Day 13: EO Conversational Assistant app
+- [ ] Day 13: EO Conversational Assistant portal module — Groq chat with EO context
 - [ ] Day 14: Week 2 review and AI-applied-to-EO document
 
 ### Week 3: Specialized Domains
 
-- [ ] Day 15: Environmental Intelligence Dashboard app
+- [ ] Day 15: Environmental Intelligence portal module
 - [ ] Day 16: SAR infrastructure monitoring notebook
-- [ ] Day 17: Atmospheric Intelligence Dashboard app
+- [ ] Day 17: Atmospheric Intelligence portal module
 - [ ] Day 18: LiDAR intelligence notebook
 - [ ] Day 19: EMIT hyperspectral notebook
-- [ ] Day 20: Multi-Layer Geospatial Dashboard app
+- [ ] Day 20: Multi-Layer Geospatial portal module
 - [ ] Day 21: Week 3 review and four domain briefs
 
 ### Week 4: Capstone Integration
 
-- [ ] Day 22: Decision Support Platform Panel 1
-- [ ] Day 23: Decision Support Platform Panel 2
-- [ ] Day 24: Decision Support Platform Panel 3 + deploy
+- [ ] Day 22: Decision Support Platform — Panel 1 portal module
+- [ ] Day 23: Decision Support Platform — Panel 2 added
+- [ ] Day 24: Decision Support Platform — Panel 3 complete
 - [ ] Day 25: EO Vendor Evaluator data layer
-- [ ] Day 26: EO Vendor Evaluator app + deploy
+- [ ] Day 26: EO Vendor Evaluator portal module
 - [ ] Day 27: Curriculum Index repository cleanup
-- [ ] Day 28: EOIL Curriculum Index app + deploy
+- [ ] Day 28: EOIL Curriculum Index portal module
 - [ ] Day 29: Conference presentation outline
 - [ ] Day 30: Gap assessment and cycle 2 planning
 
