@@ -435,6 +435,17 @@ has shifted across the full period.
             st.markdown(f"**Best for:** {ds_info['best_for']}")
             st.markdown(f"**Limitation:** {ds_info['limitation']}")
 
+    # Landsat datasets are at 30 m — 70x more pixels than MODIS.
+    # Warn the user before they run a slow query on a large region.
+    if "Landsat" in ts_dataset:
+        st.warning(
+            "⏱ **Landsat is a slow dataset for large regions.** "
+            "At 30 m resolution it has ~70x more pixels than MODIS for the same area. "
+            "Queries for a country or large region can take 1–3 minutes. "
+            "For country-level trends use MODIS NDVI instead. "
+            "Landsat works best for small areas: a field, a wetland, a river reach."
+        )
+
     st.divider()
 
     # --- Resolve region from typed location ---

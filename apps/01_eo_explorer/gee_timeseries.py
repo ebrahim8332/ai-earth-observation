@@ -98,8 +98,10 @@ DATASETS = {
         ),
         "best_for":      "Field-level crop monitoring, urban green space, precise deforestation mapping",
         "limitation": (
-            "16-day revisit and cloud gaps are frequent in tropical and monsoon regions. "
-            "Data begins 2013 for Landsat 8. GEE computation is slower than MODIS at regional scale."
+            "30 m resolution means 70x more pixels than MODIS for the same area. "
+            "Queries for country-sized regions can take 1–3 minutes or time out. "
+            "Use for small, precise areas — a field, a forest patch, a river delta. "
+            "For country or regional trends, use MODIS NDVI instead."
         ),
         "gibs_layer":    "MODIS_Terra_NDVI_8Day",   # use MODIS as visual proxy
         "chart_color":   "#1a7a4a",
@@ -158,9 +160,10 @@ DATASETS = {
         ),
         "best_for":      "Flood mapping, reservoir monitoring, wetland extent, drought-driven water loss",
         "limitation": (
-            "Dense vegetation with high NIR can suppress NDWI even where soil is wet. "
-            "Urban surfaces with concrete produce low NDWI similar to dry soil. "
-            "Cloud gaps are frequent; 16-day revisit limits flood event capture."
+            "30 m resolution means 70x more pixels than MODIS for the same area. "
+            "Queries for country-sized regions can take 1–3 minutes or time out. "
+            "Best used for small areas — a reservoir, a wetland, a river reach. "
+            "Dense vegetation also suppresses NDWI even when underlying soil is wet."
         ),
         "gibs_layer":    "MODIS_Terra_NDVI_8Day",   # visual proxy
         "chart_color":   "#1e90ff",
