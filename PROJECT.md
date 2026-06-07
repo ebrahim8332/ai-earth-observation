@@ -7,10 +7,10 @@
 
 ## Current Status
 
-**Program day:** 7 complete
+**Program day:** 8 in progress
 **Phase:** Week 1 - Orientation and Data Access
-**Last completed:** SAR Explorer module built and deployed; Welcome panel added; EO Explorer retired; bbox size warning and km display added to SAR module
-**Next session:** Day 8 — Week 1 review document; additional Time Series indices (EVI, NDWI, Burned Area)
+**Last completed:** Week 1 primer document written (docs/learning_notes/week1-primer.md); SAR interactive map fixed for Streamlit Cloud
+**Next session:** Day 8 continued — additional Time Series indices (EVI, NDWI, Burned Area)
 
 ---
 
