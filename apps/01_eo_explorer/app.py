@@ -2054,7 +2054,7 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
             st.session_state.ii_image_arr    = arr
             st.session_state.ii_metadata     = metadata
             st.session_state.ii_result_region = p["region"]
-            st.session_state.ii_result_date   = p["date"]
+            st.session_state.ii_result_date   = p["date_start"]
 
             # Immediately run vision AI interpretation
             with st.spinner(f"Asking vision AI to interpret the image of {p['region']}..."):
