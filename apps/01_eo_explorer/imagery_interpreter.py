@@ -137,8 +137,10 @@ def fetch_chip(bbox: list, date_start: str, date_end: str) -> tuple:
             best_item = items[0]
 
         # Render true-color: B4 = Red, B3 = Green, B2 = Blue
+        # Pass bbox so the render is clipped to the user's selected area,
+        # not the full 100 km × 100 km Sentinel-2 tile.
         arr = spectral_explorer.render_combination(
-            best_item, "B04", "B03", "B02", "Sentinel-2 L2A", width=600
+            best_item, "B04", "B03", "B02", "Sentinel-2 L2A", width=600, bbox=bbox
         )
 
         if arr is None or arr.max() == 0:

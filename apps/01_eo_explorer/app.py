@@ -1085,7 +1085,7 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
             cloud      = item.properties.get("eo:cloud_cover", 0)
 
             with st.spinner(f"Rendering {r_band}/{g_band}/{b_band} for {scene_date}..."):
-                arr = spectral_explorer.render_combination(item, r_band, g_band, b_band, sat_key, width=700)
+                arr = spectral_explorer.render_combination(item, r_band, g_band, b_band, sat_key, width=700, bbox=bbox_se)
 
             if arr is not None and arr.max() > 0:
                 # Store everything needed to redisplay after any widget interaction
@@ -1177,7 +1177,7 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
             st.warning("Search for scenes first.")
         else:
             with st.spinner("Rendering all combinations (30-60 seconds)..."):
-                results = spectral_explorer.render_contact_sheet(item, sat_key)
+                results = spectral_explorer.render_contact_sheet(item, sat_key, bbox=bbox_se)
 
             valid = [r for r in results if r["array"] is not None and r["array"].max() > 0]
             st.session_state.se_contact_results = valid

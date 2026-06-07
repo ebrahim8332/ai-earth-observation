@@ -119,7 +119,8 @@ def find_best_scene(items: list, r_band: str, g_band: str, b_band: str,
 # ---------------------------------------------------------------------------
 
 def render_combination(item, r_band: str, g_band: str, b_band: str,
-                        satellite_key: str, width: int = 600) -> np.ndarray | None:
+                        satellite_key: str, width: int = 600,
+                        bbox: list = None) -> np.ndarray | None:
     """
     Call the Planetary Computer rendering API to produce an RGB image from
     any three bands. Returns a numpy uint8 array or None on failure.
@@ -129,6 +130,10 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
     - Per-satellite rescale values from satellite_catalog
     - Gamma correction
     - Crop to valid (non-black) region
+
+    bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
+    When provided, the API renders only that geographic extent instead of
+    the full Sentinel-2 tile (100 km × 100 km).
     """
     sat     = satellite_catalog.SATELLITES[satellite_key]
     rescale = sat["rescale"]
@@ -151,6 +156,12 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
         ("height",     str(width)),
     ]
 
+    # Clip the render to the user's bbox when provided.
+    # Format: "min_lon,min_lat,max_lon,max_lat" (west, south, east, north).
+    # Without this, the API returns the full 100 km × 100 km Sentinel-2 tile.
+    if bbox:
+        params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
+
     if gamma:
         params.append(("color_formula", gamma))
 
@@ -170,13 +181,15 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
         return None
 
 
-def render_ndvi(item, satellite_key: str, width: int = 600) -> np.ndarray | None:
+def render_ndvi(item, satellite_key: str, width: int = 600,
+                bbox: list = None) -> np.ndarray | None:
     """
     Render an NDVI map using the titiler expression endpoint.
     NDVI = (NIR - Red) / (NIR + Red).
     Uses a red-yellow-green colormap: red = bare/stressed, green = healthy vegetation.
 
     Only supported for optical satellites (Sentinel-2 and Landsat).
+    bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
     """
     sat = satellite_catalog.SATELLITES[satellite_key]
     if sat.get("sar"):
@@ -200,6 +213,9 @@ def render_ndvi(item, satellite_key: str, width: int = 600) -> np.ndarray | None
         ("height",        str(width)),
     ]
 
+    if bbox:
+        params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
+
     try:
         resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
         if resp.status_code != 200:
@@ -211,11 +227,13 @@ def render_ndvi(item, satellite_key: str, width: int = 600) -> np.ndarray | None
         return None
 
 
-def render_ndwi(item, satellite_key: str, width: int = 600) -> np.ndarray | None:
+def render_ndwi(item, satellite_key: str, width: int = 600,
+                bbox: list = None) -> np.ndarray | None:
     """
     Render an NDWI map (water index).
     NDWI = (Green - NIR) / (Green + NIR).
     Uses a blue colormap: bright blue = open water.
+    bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
     """
     sat = satellite_catalog.SATELLITES[satellite_key]
     if sat.get("sar"):
@@ -238,6 +256,9 @@ def render_ndwi(item, satellite_key: str, width: int = 600) -> np.ndarray | None
         ("height",        str(width)),
     ]
 
+    if bbox:
+        params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
+
     try:
         resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
         if resp.status_code != 200:
@@ -256,13 +277,15 @@ def render_ndwi(item, satellite_key: str, width: int = 600) -> np.ndarray | None
 def render_contact_sheet(item, satellite_key: str,
                           include_ndvi: bool = True,
                           include_ndwi: bool = True,
-                          thumb_size: int = 300) -> list:
+                          thumb_size: int = 300,
+                          bbox: list = None) -> list:
     """
     Render every named preset for the selected satellite as a small thumbnail.
     Also renders NDVI and NDWI if requested and supported.
 
     Returns a list of dicts: [{label, note, array}, ...]
     Arrays are numpy uint8. None means the render failed.
+    bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
     """
     sat     = satellite_catalog.SATELLITES[satellite_key]
     presets = sat["presets"]
@@ -274,6 +297,7 @@ def render_contact_sheet(item, satellite_key: str,
             preset["r"], preset["g"], preset["b"],
             satellite_key,
             width=thumb_size,
+            bbox=bbox,
         )
         results.append({
             "label": label,
@@ -283,7 +307,7 @@ def render_contact_sheet(item, satellite_key: str,
         })
 
     if include_ndvi and not sat.get("sar"):
-        arr = render_ndvi(item, satellite_key, width=thumb_size)
+        arr = render_ndvi(item, satellite_key, width=thumb_size, bbox=bbox)
         results.append({
             "label": "NDVI",
             "note":  "Vegetation health index. Green = healthy. Red = bare or stressed.",
@@ -292,7 +316,7 @@ def render_contact_sheet(item, satellite_key: str,
         })
 
     if include_ndwi and not sat.get("sar"):
-        arr = render_ndwi(item, satellite_key, width=thumb_size)
+        arr = render_ndwi(item, satellite_key, width=thumb_size, bbox=bbox)
         results.append({
             "label": "NDWI",
             "note":  "Water body index. Bright blue = open water.",
