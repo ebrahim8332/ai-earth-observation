@@ -1,12 +1,16 @@
 """
-app.py — EOIL Portal v1.3
+app.py — EOIL Portal v1.6
 Streamlit layout and component wiring only. No business logic here.
 All logic is imported from other modules.
 
-v1.0  Day 1: EO Explorer foundational app
-v1.1  Day 3: Spectral Explorer tab added
-v1.2  Day 6: Time Series Explorer module added; sidebar navigation replaces tab navigation
-v1.3  Day 6: Spectral Explorer promoted to standalone sidebar module; tabs removed
+v1.0  Day 1:  EO Explorer foundational app
+v1.1  Day 3:  Spectral Explorer tab added
+v1.2  Day 6:  Time Series Explorer module added; sidebar navigation replaces tab navigation
+v1.3  Day 6:  Spectral Explorer promoted to standalone sidebar module; tabs removed
+v1.4  Day 7:  SAR Explorer added; EO Explorer replaced with Welcome panel
+v1.5  Day 9:  Change Detection module added (fifth sidebar entry)
+v1.6  Day 10: AI Imagery Interpreter added (sixth sidebar entry)
+v1.7  Day 11: Shared map picker added to all five modules
 """
 
 import streamlit as st
@@ -23,6 +27,10 @@ import satellite_catalog
 import geocoder
 import spectral_explorer
 import gee_timeseries
+import gee_sar
+import gee_change
+import imagery_interpreter
+import map_picker
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -58,7 +66,7 @@ with st.sidebar:
     st.markdown("### Module")
     selected_module = st.radio(
         "Navigate",
-        ["🗺️ EO Explorer", "🔬 Spectral Explorer", "📈 Time Series Explorer"],
+        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "📡 SAR Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -433,6 +441,17 @@ has shifted across the full period.
             st.markdown(f"**Best for:** {ds_info['best_for']}")
             st.markdown(f"**Limitation:** {ds_info['limitation']}")
 
+    # Landsat datasets are at 30 m — 70x more pixels than MODIS.
+    # Warn the user before they run a slow query on a large region.
+    if "Landsat" in ts_dataset:
+        st.warning(
+            "⏱ **Landsat is a slow dataset for large regions.** "
+            "At 30 m resolution it has ~70x more pixels than MODIS for the same area. "
+            "Queries for a country or large region can take 1–3 minutes. "
+            "For country-level trends use MODIS NDVI instead. "
+            "Landsat works best for small areas: a field, a wetland, a river reach."
+        )
+
     st.divider()
 
     # --- Resolve region from typed location ---
@@ -444,6 +463,8 @@ has shifted across the full period.
         cached_bbox  = st.session_state.get("ts_geocoded_bbox",  None)
 
         if ts_custom_place.strip() != cached_place:
+            # New location typed — clear any stale map click
+            map_picker.clear_click("ts")
             with st.spinner(f"Looking up '{ts_custom_place}'..."):
                 result_bbox = geocoder.geocode_place(ts_custom_place)
             if result_bbox:
@@ -460,6 +481,20 @@ has shifted across the full period.
             ts_bbox        = cached_bbox
             ts_region_name = ts_custom_place.strip()
             st.caption(f"📍 {ts_region_name}")
+        else:
+            # Location changed and geocode failed — clear stale map click
+            map_picker.clear_click("ts")
+
+    # Map picker — optional override shown once a geocoded centre exists
+    if ts_bbox:
+        with st.expander("📍 Refine location — click map to set exact area", expanded=False):
+            picked = map_picker.render_map_picker(
+                centre_bbox     = ts_bbox,
+                picker_key      = "ts",
+                default_size_km = 100,
+            )
+            if picked:
+                ts_bbox = picked
 
     # GEE status — compact caption so it doesn't dominate the page
     if gee_available:
@@ -663,7 +698,8 @@ has shifted across the full period.
                 interpretation = gee_timeseries.get_ai_interpretation(
                     stats, r_ds, r_reg, r_start, r_end,
                     custom_prompt=ts_user_prompt,
-                    api_key=config.GROQ_API_KEY or None,
+                    groq_key=config.GROQ_API_KEY,
+                    gemini_key=config.GEMINI_API_KEY,
                 )
                 st.session_state.ts_ai_result = interpretation
 
@@ -768,6 +804,8 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         cached_bbox  = st.session_state.get("se_geocoded_bbox",  None)
 
         if place_input.strip() != cached_place:
+            # New location typed — clear any stale map click
+            map_picker.clear_click("se")
             with st.spinner(f"Looking up '{place_input}'..."):
                 result_bbox = geocoder.geocode_place(place_input)
             if result_bbox:
@@ -789,6 +827,17 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         # Text box is empty — clear any cached geocode result
         st.session_state.se_geocoded_place = ""
         st.session_state.se_geocoded_bbox  = None
+
+    # Map picker — optional override shown once a geocoded centre exists
+    if bbox_se:
+        with st.expander("📍 Refine location — click map to set exact area", expanded=False):
+            picked = map_picker.render_map_picker(
+                centre_bbox     = bbox_se,
+                picker_key      = "se",
+                default_size_km = 50,
+            )
+            if picked:
+                bbox_se = picked
 
     # Clear all search results when the user changes the location.
     # Compare the typed text against what was last searched — not against
@@ -1173,84 +1222,1114 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
     st.stop()
 
 # ---------------------------------------------------------------------------
-# MODULE 1 — EO Explorer (reached only when EO Explorer is selected)
+# MODULE 3 — SAR Explorer (reached only when SAR Explorer is selected)
 # ---------------------------------------------------------------------------
 
-with st.sidebar:
-    st.header("EO Explorer Controls")
+if selected_module == "📡 SAR Explorer":
 
-    theme_options   = list(data_catalog.THEMES.keys())
-    selected_theme  = st.selectbox("Theme", theme_options)
+    gee_available = st.session_state.gee_available
 
-    location_options   = list(map_builder.LOCATIONS.keys())
-    selected_location  = st.selectbox("Location", location_options)
+    st.subheader("📡 SAR Explorer")
+    st.caption(
+        "Select a location and two dates. "
+        "The module fetches real Sentinel-1 radar data and shows how the surface changed."
+    )
 
-    dataset_options   = data_catalog.THEMES[selected_theme]["datasets"]
-    selected_dataset  = st.selectbox("Dataset", dataset_options)
+    with st.expander("ℹ️ What does this module do?", expanded=False):
+        st.markdown("""
+**This module answers the question: what can radar see that cameras cannot?**
 
-    ai_mode_options = [
-        "Explain selected theme",
-        "Explain selected dataset",
-        "Explain business use case",
-        "Explain limitations",
-        "Suggest next analysis",
-    ]
-    selected_ai_mode = st.selectbox("AI Mode", ai_mode_options)
+It fetches Sentinel-1 SAR (Synthetic Aperture Radar) data from Google Earth Engine
+for any location on Earth and compares two dates — even dates when cloud cover would
+make optical satellite imagery completely unusable.
+
+**What SAR is:**
+
+SAR satellites transmit their own microwave pulses toward the ground and record the
+energy that bounces back. Microwaves pass straight through clouds and work at night.
+This makes SAR the sensor of choice for flood mapping, ship detection, infrastructure
+monitoring, and tropical deforestation — anywhere optical sensors are blocked.
+
+**What you will see after running an analysis:**
+
+- **VV Polarization map** — surface roughness and vertical structures. Urban areas and
+  ships appear bright. Calm water appears very dark.
+- **VH Polarization map** — vegetation and volume scattering. Forest and crops appear
+  relatively brighter than in VV.
+- **False Color composite** — VV assigned to Red, VH to Green, VV/VH ratio to Blue.
+  Pink = urban, green = vegetation, dark = water, white = ships.
+- **Change Map** — VV difference between the two dates. Blue = backscatter increased
+  (new structures or ships arrived). Red = backscatter decreased (ships left or surface smoothed).
+- **Backscatter statistics** — VV and VH min/max/mean in dB for both dates
+- **AI interpretation** — plain-language explanation of what the values reveal
+
+**How to use it:**
+
+1. Type any location in the search box
+2. Pick two dates (the module searches a 10-day window around each date)
+3. Click Run Analysis
+        """)
+
+    # --- Controls ---
+    col_loc, col_d1, col_d2 = st.columns([3, 1, 1])
+
+    with col_loc:
+        sar_place = st.text_input(
+            "Location — port, city, coastline, or river delta (not a whole country)",
+            placeholder="e.g. Maasvlakte Rotterdam   |   Lagos harbour   |   Ganges delta   |   Singapore Strait",
+            key="sar_place",
+        )
+
+    with col_d1:
+        from datetime import date as _date, timedelta as _td
+        sar_date1 = st.date_input(
+            "Date 1",
+            value=_date(2024, 1, 10),
+            min_value=_date(2014, 1, 1),
+            max_value=_date.today(),
+            key="sar_date1",
+        )
+
+    with col_d2:
+        sar_date2 = st.date_input(
+            "Date 2",
+            value=_date(2024, 3, 15),
+            min_value=_date(2014, 1, 1),
+            max_value=_date.today(),
+            key="sar_date2",
+        )
+
+    _, col_run = st.columns([4, 1])
+    with col_run:
+        sar_run_btn = st.button(
+            "▶ Run Analysis", type="primary",
+            use_container_width=True, key="sar_run",
+        )
+
+    # --- Geocode location ---
+    sar_bbox        = None
+    sar_region_name = ""
+
+    if sar_place.strip():
+        cached_place = st.session_state.get("sar_geocoded_place", "")
+        cached_bbox  = st.session_state.get("sar_geocoded_bbox",  None)
+
+        if sar_place.strip() != cached_place:
+            # New location typed — clear any stale map click
+            map_picker.clear_click("sar")
+            with st.spinner(f"Looking up '{sar_place}'..."):
+                result_bbox = geocoder.geocode_place(sar_place)
+            if result_bbox:
+                st.session_state.sar_geocoded_place = sar_place.strip()
+                st.session_state.sar_geocoded_bbox  = result_bbox
+                cached_bbox = result_bbox
+            else:
+                st.session_state.sar_geocoded_place = ""
+                st.session_state.sar_geocoded_bbox  = None
+                cached_bbox = None
+                st.error(f"Could not find '{sar_place}'. Try a broader name.")
+
+        if cached_bbox:
+            sar_bbox        = cached_bbox
+            sar_region_name = sar_place.strip()
+
+            # Show the area size so the user can judge before running
+            w_km, h_km = geocoder.bbox_dims_km(sar_bbox)
+            st.caption(f"📍 {sar_region_name} — {w_km:.0f} km × {h_km:.0f} km")
+
+            # Warn if either dimension exceeds the useful SAR display threshold.
+            # Sentinel-1 at 10-20 m resolution rendered into a 400px image:
+            # anything wider than ~150 km loses all meaningful detail.
+            SAR_MAX_KM = 150
+            if w_km > SAR_MAX_KM or h_km > SAR_MAX_KM:
+                st.warning(
+                    f"**This area is too large for SAR detail.** "
+                    f"{sar_region_name} spans {w_km:.0f} km × {h_km:.0f} km. "
+                    f"Sentinel-1 resolution is 10-20 metres. At this scale, "
+                    f"individual features — ships, buildings, rivers — are invisible. "
+                    f"Try a specific port, harbour, city district, or coastal stretch "
+                    f"no wider than {SAR_MAX_KM} km."
+                )
+
+    # Map picker — optional override shown once a geocoded centre exists
+    if sar_bbox:
+        with st.expander("📍 Refine location — click map to set exact area", expanded=False):
+            picked = map_picker.render_map_picker(
+                centre_bbox     = sar_bbox,
+                picker_key      = "sar",
+                default_size_km = 50,
+            )
+            if picked:
+                sar_bbox = picked
+
+    # GEE status
+    if gee_available:
+        st.caption("🟢 GEE connected — live Sentinel-1 data active.")
+    else:
+        st.caption("🔴 GEE not connected. SAR Explorer requires live GEE data.")
 
     st.divider()
-    provider_status = ai_assistant.get_provider_status()
-    st.caption(f"AI: **{provider_status}**")
 
-col_map, col_explain = st.columns([3, 2])
+    # --- Session state initialisation ---
+    for _k, _v in [
+        ("sar_maps",          None), ("sar_stats1",       None), ("sar_stats2", None),
+        ("sar_result_region", None), ("sar_result_date1", None),
+        ("sar_result_date2",  None), ("sar_ai_result",    None),
+    ]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
 
-with col_map:
-    st.subheader("Interactive Map")
-    fmap = map_builder.build_map(selected_location)
-    st_folium(fmap, use_container_width=True, height=550, returned_objects=[])
+    # --- Two-step run pattern (same as Time Series Explorer) ---
+    if sar_run_btn:
+        if not sar_bbox:
+            st.warning("Enter a location first.")
+        elif not gee_available:
+            st.error("SAR Explorer requires GEE credentials. Add GEE_SERVICE_ACCOUNT_JSON to Streamlit secrets.")
+        elif sar_date1 >= sar_date2:
+            st.error("Date 1 must be before Date 2.")
+        else:
+            st.session_state.sar_maps        = None
+            st.session_state.sar_stats1      = None
+            st.session_state.sar_stats2      = None
+            st.session_state.sar_ai_result   = None
+            st.session_state.sar_pending_run = {
+                "bbox":   sar_bbox,
+                "date1":  str(sar_date1),
+                "date2":  str(sar_date2),
+                "region": sar_region_name,
+            }
+            st.rerun()
 
-with col_explain:
-    st.subheader("Dataset and Theme Overview")
-    theme_data = data_catalog.THEMES[selected_theme]
-    st.markdown(f"**Theme:** {selected_theme}")
-    st.markdown(theme_data["description"])
+    if st.session_state.get("sar_pending_run"):
+        p = st.session_state.sar_pending_run
+        st.session_state.sar_pending_run = None
+
+        with st.spinner(f"Fetching Sentinel-1 images for {p['region']}..."):
+            img1, count1, bbox1 = gee_sar.fetch_sar_image(p["bbox"], p["date1"], gee_available)
+            img2, count2, bbox2 = gee_sar.fetch_sar_image(p["bbox"], p["date2"], gee_available)
+
+        # Use the padded bbox for all downstream calls.
+        # fetch_sar_image expands point geocodes (e.g. "Port of Rotterdam") to
+        # MIN_BBOX_DEG so the SAR image covers a usable area.
+        eff_bbox = bbox1 if bbox1 else bbox2
+
+        if img1 is None or img2 is None:
+            st.error(
+                f"No Sentinel-1 images found near the selected dates for this location. "
+                f"Try dates that are further apart, or a different location. "
+                f"(Date 1: {count1} scenes found, Date 2: {count2} scenes found)"
+            )
+        else:
+            with st.spinner("Computing backscatter statistics..."):
+                stats1 = gee_sar.get_backscatter_stats(img1, eff_bbox)
+                stats2 = gee_sar.get_backscatter_stats(img2, eff_bbox)
+
+            with st.spinner("Building interactive SAR map (this takes 20-40 seconds)..."):
+                sar_map = gee_sar.build_sar_map(img1, img2, eff_bbox, p["date1"], p["date2"])
+
+            st.session_state.sar_maps         = sar_map
+            st.session_state.sar_stats1       = stats1
+            st.session_state.sar_stats2       = stats2
+            st.session_state.sar_result_region = p["region"]
+            st.session_state.sar_result_date1  = p["date1"]
+            st.session_state.sar_result_date2  = p["date2"]
+            st.success(
+                f"Analysis complete — {p['date1']} and {p['date2']} over {p['region']}."
+            )
+
+    # --- Display results ---
+    if st.session_state.sar_maps is not None:
+        maps   = st.session_state.sar_maps
+        stats1 = st.session_state.sar_stats1
+        stats2 = st.session_state.sar_stats2
+        r_reg  = st.session_state.sar_result_region
+        r_d1   = st.session_state.sar_result_date1
+        r_d2   = st.session_state.sar_result_date2
+
+        def sar_section_break():
+            st.markdown(
+                '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 28px 0 20px 0;">',
+                unsafe_allow_html=True,
+            )
+
+        # --- SECTION 1: Backscatter statistics ---
+        st.subheader("📊 Backscatter Statistics")
+        col_s1, col_s2 = st.columns(2)
+
+        with col_s1:
+            st.markdown(f"**Date 1 — {r_d1}**")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("VV min",  f"{stats1['VV_min']} dB")
+            c2.metric("VV mean", f"{stats1['VV_mean']} dB")
+            c3.metric("VV max",  f"{stats1['VV_max']} dB")
+            c4, c5, c6 = st.columns(3)
+            c4.metric("VH min",  f"{stats1['VH_min']} dB")
+            c5.metric("VH mean", f"{stats1['VH_mean']} dB")
+            c6.metric("VH max",  f"{stats1['VH_max']} dB")
+
+        with col_s2:
+            st.markdown(f"**Date 2 — {r_d2}**")
+            c1, c2, c3 = st.columns(3)
+            vv_delta = stats2['VV_mean'] - stats1['VV_mean']
+            vh_delta = stats2['VH_mean'] - stats1['VH_mean']
+            c1.metric("VV min",  f"{stats2['VV_min']} dB")
+            c2.metric("VV mean", f"{stats2['VV_mean']} dB", delta=f"{vv_delta:+.1f} dB")
+            c3.metric("VV max",  f"{stats2['VV_max']} dB")
+            c4, c5, c6 = st.columns(3)
+            c4.metric("VH min",  f"{stats2['VH_min']} dB")
+            c5.metric("VH mean", f"{stats2['VH_mean']} dB", delta=f"{vh_delta:+.1f} dB")
+            c6.metric("VH max",  f"{stats2['VH_max']} dB")
+
+        sar_section_break()
+
+        # --- SECTION 2: Stats chart ---
+        st.subheader("📈 Backscatter Comparison Chart")
+        fig_stats = gee_sar.build_stats_chart(stats1, stats2, r_d1, r_d2)
+        st.plotly_chart(fig_stats, use_container_width=True)
+
+        st.caption(
+            "**Reading the chart:** Values near -20 dB = calm water. "
+            "-10 to -15 dB = vegetation. Above -5 dB = urban areas or ships. "
+            "VV responds to vertical structures. VH responds to vegetation volume."
+        )
+
+        sar_section_break()
+
+        # --- SECTION 3: Interactive SAR Map ---
+        # GEE tile URLs include a time-limited auth token in the URL itself.
+        # The browser can fetch them directly — no special headers needed.
+        # This gives us full zoom/pan interactivity via Folium TileLayers.
+        st.subheader("🗺️ SAR Views")
+
+        st.caption(
+            "Toggle layers using the control in the top-right corner of the map. "
+            "VV Date 1 is shown by default. "
+            "**VV** = surface roughness, ships, buildings bright. "
+            "**VH** = vegetation volume bright. "
+            "**False Color** = Red:VV Green:VH Blue:ratio — pink=urban, green=vegetation, dark=water. "
+            "**Change Map** = blue: backscatter increased, red: decreased."
+        )
+
+        if maps is not None:
+            st_folium(maps, width=700, height=500, returned_objects=[])
+        else:
+            st.warning("SAR map could not be built. Check GEE connection.")
+
+        sar_section_break()
+
+        # --- SECTION 4: AI Interpretation ---
+        st.subheader("🤖 AI Interpretation")
+        if st.button("Get AI Interpretation", type="primary", key="sar_ai_btn"):
+            with st.spinner("Thinking..."):
+                interpretation = gee_sar.get_sar_interpretation(
+                    stats1, stats2, r_d1, r_d2, r_reg,
+                    groq_key=config.GROQ_API_KEY,
+                    gemini_key=config.GEMINI_API_KEY,
+                )
+                st.session_state.sar_ai_result = interpretation
+
+        if st.session_state.get("sar_ai_result"):
+            st.markdown(st.session_state.sar_ai_result)
+
+    else:
+        st.markdown("---")
+        st.markdown(
+            "**Type a location above, pick two dates, then click Run Analysis.**\n\n"
+            "The module will fetch live Sentinel-1 radar data and show VV, VH, "
+            "false color, and change maps alongside backscatter statistics."
+        )
+
+    st.stop()
+
+# ---------------------------------------------------------------------------
+# MODULE 4 — Change Detection (reached only when Change Detection is selected)
+# ---------------------------------------------------------------------------
+
+if selected_module == "🔀 Change Detection":
+
+    from streamlit_folium import st_folium as _st_folium
+    from datetime import date as _date
+
+    gee_available = st.session_state.gee_available
+
+    st.subheader("🔀 Change Detection")
+    st.caption(
+        "Select a location and two dates. "
+        "The module computes the NDVI difference and shows where vegetation gained or lost."
+    )
+
+    with st.expander("ℹ️ What does this module do?", expanded=False):
+        st.markdown("""
+**This module answers the question: what changed between two dates?**
+
+It fetches Sentinel-2 satellite imagery for two dates and computes the NDVI difference —
+a pixel-by-pixel comparison of vegetation greenness. Where NDVI increased, vegetation
+grew or recovered. Where NDVI decreased, vegetation died, burned, or was removed.
+
+**How to use it:**
+
+1. Type any location in the search box
+2. Pick two dates (the module searches a 30-day window around each date for cloud-free imagery)
+3. Click Run Analysis
+
+**Data source:** Sentinel-2 Surface Reflectance via Google Earth Engine.
+MODIS is used as a fallback if Sentinel-2 has insufficient cloud-free coverage.
+
+---
+
+**What is NDVI?**
+
+NDVI stands for Normalized Difference Vegetation Index. It is the most widely used
+measure of vegetation health from satellite data.
+
+Formula: **(NIR − Red) / (NIR + Red)**
+
+Healthy plants absorb red light for photosynthesis and reflect near-infrared strongly.
+Bare soil reflects both at similar levels. Water absorbs both almost completely.
+
+| Surface | Typical NDVI |
+|---|---|
+| Dense healthy forest | 0.6 – 0.9 |
+| Crops mid-season | 0.4 – 0.7 |
+| Sparse or stressed vegetation | 0.2 – 0.4 |
+| Bare soil | 0.1 – 0.2 |
+| Water | 0 or negative |
+
+---
+
+**How to read the statistics**
+
+**Mean NDVI — Date 1 and Date 2 (baseline and endpoint)**
+These are the average NDVI values across the whole region for each date.
+They give the change context. A shift of +0.3 from a baseline of 0.1 (bare soil recovering)
+is very different from +0.3 from a baseline of 0.5 (already-dense forest getting denser).
+Without the baseline, the difference alone can mislead.
+
+**Mean NDVI change**
+The average pixel-by-pixel difference: Date 2 minus Date 1.
+Positive = net greening across the region. Negative = net browning.
+
+**Spatial variability (standard deviation of change)**
+This is the single most diagnostic number for understanding *why* a region changed.
+A low standard deviation means every pixel moved in the same direction by roughly the same
+amount — almost always a seasonal signal (wet season arriving, dry season setting in).
+A high standard deviation means change is concentrated in patches — more likely fire,
+deforestation, flood inundation, or agricultural clearing.
+
+**Net change (gain area minus loss area)**
+One number for a briefing headline. Tells you whether the region is net gaining or
+net losing vegetation, in km².
+
+**Gain / Loss ratio**
+Gain area divided by loss area. Above 1 means more land gained vegetation than lost it.
+Below 1 means the opposite. Useful for comparing regions or time periods.
+
+**Gain and Loss areas (±0.1 threshold)**
+Area in km² where NDVI changed by more than ±0.1. This threshold separates real
+vegetation change from sensor noise and minor cloud contamination artefacts.
+
+**Stable area**
+Area where NDVI changed by less than ±0.1. This is the land that did not meaningfully
+change between the two dates.
+
+**Extreme gain and Extreme loss (±0.3 threshold)**
+Area where NDVI changed by more than ±0.3. This separates dramatic events from ordinary
+seasonal movement. Large extreme gain areas suggest post-fire regrowth, crop establishment
+after irrigation, or a very strong wet season flush. Large extreme loss areas suggest
+fire, clearcut deforestation, or severe drought stress.
+
+---
+
+**Change map colour guide**
+
+- 🟢 **Green** — vegetation increased between Date 1 and Date 2
+- 🔴 **Red** — vegetation decreased
+- ⬜ **White** — no significant change
+
+Toggle between NDVI Date 1, NDVI Date 2, and the change map using the layer control
+in the top-right corner of the map.
+        """)
+
+    # --- Controls ---
+    col_loc, col_d1, col_d2 = st.columns([3, 1, 1])
+
+    with col_loc:
+        cd_place = st.text_input(
+            "Location — type any region, country, or ecosystem",
+            placeholder="e.g. Sahel, West Africa   |   Amazon, Brazil   |   California, USA",
+            key="cd_place",
+        )
+
+    with col_d1:
+        cd_date1 = st.date_input(
+            "Date 1",
+            value=_date(2023, 2, 1),
+            min_value=_date(2017, 1, 1),
+            max_value=_date.today(),
+            key="cd_date1",
+        )
+
+    with col_d2:
+        cd_date2 = st.date_input(
+            "Date 2",
+            value=_date(2023, 9, 1),
+            min_value=_date(2017, 1, 1),
+            max_value=_date.today(),
+            key="cd_date2",
+        )
+
+    _, col_run = st.columns([4, 1])
+    with col_run:
+        cd_run_btn = st.button(
+            "▶ Run Analysis", type="primary",
+            use_container_width=True, key="cd_run",
+        )
+
+    # --- Geocode ---
+    cd_bbox        = None
+    cd_region_name = ""
+
+    if cd_place.strip():
+        cached_place = st.session_state.get("cd_geocoded_place", "")
+        cached_bbox  = st.session_state.get("cd_geocoded_bbox",  None)
+
+        if cd_place.strip() != cached_place:
+            # New location typed — clear any stale map click
+            map_picker.clear_click("cd")
+            with st.spinner(f"Looking up '{cd_place}'..."):
+                result_bbox = geocoder.geocode_place(cd_place)
+            if result_bbox:
+                st.session_state.cd_geocoded_place = cd_place.strip()
+                st.session_state.cd_geocoded_bbox  = result_bbox
+                cached_bbox = result_bbox
+            else:
+                st.session_state.cd_geocoded_place = ""
+                st.session_state.cd_geocoded_bbox  = None
+                cached_bbox = None
+                st.error(f"Could not find '{cd_place}'. Try a broader name.")
+
+        if cached_bbox:
+            cd_bbox        = cached_bbox
+            cd_region_name = cd_place.strip()
+            st.caption(f"📍 {cd_region_name}")
+
+    # Map picker — optional override shown once a geocoded centre exists
+    if cd_bbox:
+        with st.expander("📍 Refine location — click map to set exact area", expanded=False):
+            picked = map_picker.render_map_picker(
+                centre_bbox     = cd_bbox,
+                picker_key      = "cd",
+                default_size_km = 100,
+            )
+            if picked:
+                cd_bbox = picked
+
+    if gee_available:
+        st.caption("🟢 GEE connected — live Sentinel-2 / MODIS data active.")
+    else:
+        st.caption("🔴 GEE not connected. Change Detection requires live GEE data.")
+
     st.divider()
-    dataset_data = data_catalog.DATASETS.get(selected_dataset, {})
-    if dataset_data:
-        st.markdown(f"**Dataset:** {selected_dataset}")
-        st.markdown(f"- **What it measures:** {dataset_data['measures']}")
-        st.markdown(f"- **Sensors:** {dataset_data['sensors']}")
-        st.markdown(f"- **Resolution:** {dataset_data['resolution']}")
-        st.markdown(f"- **Revisit frequency:** {dataset_data['revisit']}")
-        st.markdown(f"- **Typical use cases:** {dataset_data['use_cases']}")
-        st.markdown(f"- **Key limitations:** {dataset_data['limitations']}")
 
-st.divider()
-st.subheader("AI Assistant")
-st.caption(f"Mode: **{selected_ai_mode}** | Provider: **{provider_status}**")
+    # --- Session state ---
+    for _k, _v in [
+        ("cd_map",           None), ("cd_stats",         None),
+        ("cd_result_region", None), ("cd_result_date1",  None),
+        ("cd_result_date2",  None), ("cd_result_src1",   None),
+        ("cd_result_src2",   None), ("cd_ai_result",     None), ("cd_ai_model", None),
+    ]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
 
-user_question = st.text_input(
-    "Ask a question:",
-    placeholder="e.g. How does Sentinel-2 detect vegetation stress?",
-    key="tab1_question",
+    # --- Two-step run pattern ---
+    if cd_run_btn:
+        if not cd_bbox:
+            st.warning("Enter a location first.")
+        elif not gee_available:
+            st.error("Change Detection requires GEE credentials. Add GEE_SERVICE_ACCOUNT_JSON to Streamlit secrets.")
+        elif cd_date1 >= cd_date2:
+            st.error("Date 1 must be before Date 2.")
+        else:
+            st.session_state.cd_map        = None
+            st.session_state.cd_stats      = None
+            st.session_state.cd_ai_result  = None
+            st.session_state.cd_pending_run = {
+                "bbox":   cd_bbox,
+                "date1":  str(cd_date1),
+                "date2":  str(cd_date2),
+                "region": cd_region_name,
+            }
+            st.rerun()
+
+    if st.session_state.get("cd_pending_run"):
+        p = st.session_state.cd_pending_run
+        st.session_state.cd_pending_run = None
+
+        with st.spinner(f"Fetching NDVI Date 1 ({p['date1']}) for {p['region']}..."):
+            img1, src1 = gee_change.fetch_ndvi_image(p["bbox"], p["date1"], gee_available)
+
+        with st.spinner(f"Fetching NDVI Date 2 ({p['date2']}) for {p['region']}..."):
+            img2, src2 = gee_change.fetch_ndvi_image(p["bbox"], p["date2"], gee_available)
+
+        if img1 is None or img2 is None:
+            st.error(
+                "Could not retrieve NDVI imagery for one or both dates. "
+                "Try a wider date range, a different location, or check GEE credentials."
+            )
+        else:
+            with st.spinner("Computing change statistics..."):
+                diff_img = img2.subtract(img1).rename("NDVI_diff")
+                stats = gee_change.compute_change_stats(img1, img2, diff_img, p["bbox"], gee_available)
+
+            with st.spinner("Building change map (20-40 seconds)..."):
+                cd_map = gee_change.build_change_map(
+                    img1, img2, p["bbox"], p["date1"], p["date2"], gee_available
+                )
+
+            st.session_state.cd_map          = cd_map
+            st.session_state.cd_stats        = stats
+            st.session_state.cd_result_region = p["region"]
+            st.session_state.cd_result_date1  = p["date1"]
+            st.session_state.cd_result_date2  = p["date2"]
+            st.session_state.cd_result_src1   = src1
+            st.session_state.cd_result_src2   = src2
+            st.success(
+                f"Analysis complete — {p['date1']} and {p['date2']} over {p['region']}. "
+                f"Date 1 source: {src1}. Date 2 source: {src2}."
+            )
+
+    # --- Display results ---
+    if st.session_state.cd_stats is not None:
+        stats  = st.session_state.cd_stats
+        r_reg  = st.session_state.cd_result_region
+        r_d1   = st.session_state.cd_result_date1
+        r_d2   = st.session_state.cd_result_date2
+
+        def cd_section_break():
+            st.markdown(
+                '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 28px 0 20px 0;">',
+                unsafe_allow_html=True,
+            )
+
+        # --- SECTION 1: Summary statistics ---
+        st.subheader("📊 Change Statistics")
+
+        # Row 1: Headline change numbers
+        c1, c2, c3, c4 = st.columns(4)
+        delta_color = "normal" if stats["mean_change"] >= 0 else "inverse"
+        c1.metric(
+            "Mean NDVI change",
+            f"{stats['mean_change']:+.4f}",
+            delta="Greening" if stats["mean_change"] > 0 else "Browning",
+            delta_color=delta_color,
+        )
+        c2.metric(
+            "NDVI — Date 1 (baseline)",
+            f"{stats['mean_ndvi1']:.3f}",
+        )
+        c3.metric(
+            "NDVI — Date 2 (endpoint)",
+            f"{stats['mean_ndvi2']:.3f}",
+            delta=f"{stats['mean_change']:+.3f}",
+            delta_color=delta_color,
+        )
+        c4.metric(
+            "Spatial variability (std dev)",
+            f"{stats['std_change']:.4f}",
+            help="Low = uniform change (typically seasonal). High = patchy change (fire, clearing, flood).",
+        )
+
+        st.markdown("")
+
+        # Row 2: Area breakdown
+        thr = gee_change.CHANGE_THRESHOLD
+        ext = gee_change.EXTREME_THRESHOLD
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric(
+            f"🟢 Gain area (>{thr} NDVI)",
+            f"{stats['area_gain_km2']:,.0f} km²",
+            delta=f"{stats['pct_gain']:.1f}% of region",
+        )
+        a2.metric(
+            f"🔴 Loss area (<-{thr} NDVI)",
+            f"{stats['area_loss_km2']:,.0f} km²",
+            delta=f"{stats['pct_loss']:.1f}% of region",
+        )
+        a3.metric(
+            "⬜ Stable area",
+            f"{stats['area_stable_km2']:,.0f} km²",
+            delta=f"{stats['pct_stable']:.1f}% of region",
+        )
+        a4.metric(
+            "Total area analysed",
+            f"{stats['area_total_km2']:,.0f} km²",
+        )
+
+        st.markdown("")
+
+        # Row 3: Derived indicators
+        ratio = stats["gain_loss_ratio"]
+        ratio_str = f"{ratio:.2f}×" if ratio is not None else "∞ (no loss)"
+        net_dir   = "net gain" if stats["net_change_km2"] >= 0 else "net loss"
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric(
+            "Net change (gain − loss)",
+            f"{stats['net_change_km2']:+,.0f} km²",
+            delta=net_dir,
+            delta_color="normal" if stats["net_change_km2"] >= 0 else "inverse",
+        )
+        b2.metric(
+            "Gain / Loss ratio",
+            ratio_str,
+            help=">1 means more land gained vegetation than lost it.",
+        )
+        b3.metric(
+            f"⚡ Extreme gain (>{ext} NDVI)",
+            f"{stats['area_extreme_gain_km2']:,.0f} km²",
+            help=f"Area where NDVI increased by more than {ext} — regrowth, crop establishment, or post-rain flush.",
+        )
+        b4.metric(
+            f"⚡ Extreme loss (<-{ext} NDVI)",
+            f"{stats['area_extreme_loss_km2']:,.0f} km²",
+            help=f"Area where NDVI dropped by more than {ext} — likely fire, clearcut, or severe drought.",
+        )
+
+        cd_section_break()
+
+        # --- SECTION 2: Change map ---
+        st.subheader("🗺️ Change Map")
+        st.caption(
+            "Toggle layers using the control in the top-right corner of the map. "
+            "**Change map** is shown by default: green = vegetation gain, red = vegetation loss, white = stable. "
+            "Switch to NDVI Date 1 or Date 2 to see the raw greenness values."
+        )
+
+        if st.session_state.cd_map is not None:
+            _st_folium(st.session_state.cd_map, width=700, height=520, returned_objects=[])
+        else:
+            st.warning("Map could not be built. Check GEE connection.")
+
+        cd_section_break()
+
+        # --- SECTION 3: AI Interpretation ---
+        st.subheader("🤖 AI Interpretation")
+        if st.button("Get AI Interpretation", type="primary", key="cd_ai_btn"):
+            with st.spinner("Thinking..."):
+                interpretation, model_used = gee_change.get_change_interpretation(
+                    stats,
+                    r_d1, r_d2, r_reg,
+                    st.session_state.cd_result_src1,
+                    st.session_state.cd_result_src2,
+                    groq_key=config.GROQ_API_KEY,
+                    gemini_key=config.GEMINI_API_KEY,
+                )
+                st.session_state.cd_ai_result = interpretation
+                st.session_state.cd_ai_model  = model_used
+
+        if st.session_state.get("cd_ai_result"):
+            st.markdown(st.session_state.cd_ai_result)
+            model_used = st.session_state.get("cd_ai_model")
+            if model_used:
+                st.caption(f"AI response from **{model_used}**")
+            else:
+                st.caption("Showing built-in fallback interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
+
+    else:
+        st.markdown("---")
+        st.markdown(
+            "**Type a location above, pick two dates, then click Run Analysis.**\n\n"
+            "The module will compute the NDVI difference and show an interactive change map "
+            "alongside summary statistics and an AI interpretation."
+        )
+
+    st.stop()
+
+# ---------------------------------------------------------------------------
+# MODULE 5 — AI Imagery Interpreter
+# ---------------------------------------------------------------------------
+
+if selected_module == "🔍 AI Imagery Interpreter":
+
+    from datetime import date as _date
+
+    st.subheader("🔍 AI Imagery Interpreter")
+    st.caption(
+        "Pick a location and a date range. The module finds the best available "
+        "Sentinel-2 scene in that window and asks a vision AI to describe what it sees."
+    )
+
+    with st.expander("ℹ️ What does this module do?", expanded=False):
+        st.markdown("""
+**This module answers the question: what does this place look like from space — and what does it mean?**
+
+Every other module in this portal sends numbers and statistics to an AI text model.
+This module sends an actual satellite image to a vision model. The AI reads the picture
+directly — identifying land cover, surface features, seasonal state, and what the image
+could inform in a real-world context.
+
+**What you will see after running an analysis:**
+
+- **Sentinel-2 true-color image** — the actual satellite chip for your location and date,
+  rendered in natural colour (Red=B4, Green=B3, Blue=B2)
+- **Scene metadata** — exact acquisition date, cloud cover, and scene ID
+- **Vision AI interpretation** — 3-4 paragraphs describing land cover types, notable
+  features, ecological state, and potential decision uses
+- **Model attribution** — which model in the 8-model vision chain produced the response
+
+**How to use it:**
+
+1. Type any location in the search box
+2. Set a date range — this is the window searched for cloud-free Sentinel-2 scenes
+3. The module picks the best available scene within your range (lowest cloud cover, best coverage)
+4. Click Analyse
+5. Wait 15-30 seconds while the chip is fetched and interpreted
+
+**Tips for setting the date range:**
+- A 1-3 month window gives enough scenes to find a clean one in most regions
+- Narrow the range when you want a specific season (e.g. June-August for northern summer)
+- Widen the range for persistently cloudy regions (tropics, maritime climates)
+
+**How to read a true-color satellite image:**
+
+- **Dark to bright green** — healthy vegetation. Dense forest is darker. Crops and grass are lighter.
+- **Dark blue to black** — open water. Deep water absorbs almost all light.
+- **Grey or white** — urban surfaces, bare concrete, or cloud cover.
+- **Brown or tan** — bare soil, dry grassland, or harvested fields.
+- **Bright white patches** — clouds or snow and ice.
+
+**Vision chain:** 7 multimodal models in fallback order — 5 Gemini (gemini-2.5-flash first)
+then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receive images.
+        """)
+
+    # --- Controls ---
+    col_loc, col_d1, col_d2 = st.columns([3, 1, 1])
+
+    with col_loc:
+        ii_place = st.text_input(
+            "Location — type any city, region, or ecosystem",
+            placeholder="e.g. Zanzibar   |   Mekong Delta   |   Sahara, Algeria   |   Swiss Alps",
+            key="ii_place",
+        )
+
+    with col_d1:
+        ii_date_start = st.date_input(
+            "From date",
+            value=_date(2024, 1, 1),
+            min_value=_date(2017, 1, 1),
+            max_value=_date.today(),
+            key="ii_date_start",
+        )
+
+    with col_d2:
+        ii_date_end = st.date_input(
+            "To date",
+            value=_date(2024, 4, 1),
+            min_value=_date(2017, 1, 1),
+            max_value=_date.today(),
+            key="ii_date_end",
+        )
+
+    _, col_run = st.columns([4, 1])
+    with col_run:
+        ii_run_btn = st.button(
+            "▶ Analyse", type="primary",
+            use_container_width=True, key="ii_run",
+        )
+
+    # --- Geocode ---
+    ii_bbox        = None
+    ii_region_name = ""
+
+    if ii_place.strip():
+        cached_place = st.session_state.get("ii_geocoded_place", "")
+        cached_bbox  = st.session_state.get("ii_geocoded_bbox",  None)
+
+        if ii_place.strip() != cached_place:
+            # New location typed — clear any stale map click
+            map_picker.clear_click("ii")
+            with st.spinner(f"Looking up '{ii_place}'..."):
+                result_bbox = geocoder.geocode_place(ii_place)
+            if result_bbox:
+                st.session_state.ii_geocoded_place = ii_place.strip()
+                st.session_state.ii_geocoded_bbox  = result_bbox
+                cached_bbox = result_bbox
+            else:
+                st.session_state.ii_geocoded_place = ""
+                st.session_state.ii_geocoded_bbox  = None
+                cached_bbox = None
+                st.error(f"Could not find '{ii_place}'. Try a broader name.")
+
+        if cached_bbox:
+            ii_bbox        = cached_bbox
+            ii_region_name = ii_place.strip()
+            area = geocoder.bbox_area_km2(cached_bbox)
+            st.caption(f"📍 {ii_region_name} — {area:,.0f} km²")
+
+            # Size warnings — imagery interpretation loses detail above ~25,000 km²
+            # At 600px image width, 25,000 km² = ~8m per pixel (city-level detail lost)
+            if area > 100_000:
+                st.error(
+                    f"**This area is too large for meaningful imagery interpretation.** "
+                    f"{ii_region_name} spans {area:,.0f} km². "
+                    f"At this scale the satellite chip will show an entire country — "
+                    f"individual features are invisible. "
+                    f"Try a city name, a national park, an island, or a specific coastal area. "
+                    f"For river features, search for the nearest town instead "
+                    f"(e.g. 'Jinja, Uganda' for the Nile source at Lake Victoria)."
+                )
+                ii_bbox = None  # block the run
+            elif area > 25_000:
+                st.warning(
+                    f"**Large area — detail will be limited.** "
+                    f"{ii_region_name} spans {area:,.0f} km². "
+                    f"Small features like rivers, roads, and fields may not be visible. "
+                    f"For better results, try a more specific location within this region."
+                )
+
+    # Map picker — optional override shown once a geocoded centre exists
+    # Especially useful here: eliminates the geocoding ambiguity problem where
+    # descriptive phrases (e.g. "Nile river north of lake victoria") return huge bboxes.
+    if ii_bbox:
+        with st.expander("📍 Refine location — click map to set exact area", expanded=False):
+            picked = map_picker.render_map_picker(
+                centre_bbox     = ii_bbox,
+                picker_key      = "ii",
+                default_size_km = 50,
+            )
+            if picked:
+                ii_bbox = picked
+                ii_region_name = ii_region_name  # keep the typed name as the label
+
+    st.caption("🌐 Data source: Sentinel-2 L2A via Planetary Computer (Microsoft). No GEE required.")
+    st.divider()
+
+    # --- Session state ---
+    for _k, _v in [
+        ("ii_image_arr",    None), ("ii_metadata",       None),
+        ("ii_result_region", None), ("ii_result_date",   None),
+        ("ii_ai_result",    None), ("ii_ai_model",       None),
+    ]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
+
+    # --- Two-step run pattern ---
+    if ii_run_btn:
+        if not ii_bbox:
+            st.warning("Enter a location first.")
+        elif ii_date_start >= ii_date_end:
+            st.error("From date must be before To date.")
+        else:
+            st.session_state.ii_image_arr    = None
+            st.session_state.ii_metadata     = None
+            st.session_state.ii_ai_result    = None
+            st.session_state.ii_ai_model     = None
+            st.session_state.ii_pending_run  = {
+                "bbox":       ii_bbox,
+                "date_start": str(ii_date_start),
+                "date_end":   str(ii_date_end),
+                "region":     ii_region_name,
+            }
+            st.rerun()
+
+    if st.session_state.get("ii_pending_run"):
+        p = st.session_state.ii_pending_run
+        st.session_state.ii_pending_run = None
+
+        with st.spinner(f"Searching Planetary Computer for {p['region']} ({p['date_start']} to {p['date_end']})..."):
+            arr, metadata = imagery_interpreter.fetch_chip(p["bbox"], p["date_start"], p["date_end"])
+
+        if arr is None:
+            st.error(
+                f"No Sentinel-2 scene found for {p['region']} between "
+                f"{p['date_start']} and {p['date_end']}. "
+                "Try widening the date range or increasing cloud cover tolerance."
+            )
+        else:
+            st.session_state.ii_image_arr    = arr
+            st.session_state.ii_metadata     = metadata
+            st.session_state.ii_result_region = p["region"]
+            st.session_state.ii_result_date   = p["date_start"]
+
+            # Immediately run vision AI interpretation
+            with st.spinner(f"Asking vision AI to interpret the image of {p['region']}..."):
+                image_bytes = imagery_interpreter.array_to_jpeg_bytes(arr)
+                interpretation, model_used = imagery_interpreter.interpret_image(
+                    image_bytes,
+                    location   = p["region"],
+                    date_str   = metadata["date"],
+                    gemini_key = config.GEMINI_API_KEY,
+                    groq_key   = config.GROQ_API_KEY,
+                )
+
+            if interpretation:
+                st.session_state.ii_ai_result = interpretation
+                st.session_state.ii_ai_model  = model_used
+            else:
+                st.session_state.ii_ai_result = imagery_interpreter.get_fallback_interpretation(
+                    p["region"], metadata["date"]
+                )
+                st.session_state.ii_ai_model  = None
+
+            st.success(
+                f"Scene found: {metadata['date']} — cloud cover {metadata['cloud_cover']:.1f}%"
+            )
+
+    # --- Display results ---
+    if st.session_state.ii_image_arr is not None:
+        arr      = st.session_state.ii_image_arr
+        metadata = st.session_state.ii_metadata
+        r_reg    = st.session_state.ii_result_region
+        r_date   = st.session_state.ii_result_date
+
+        st.subheader("🛰️ Satellite Image")
+
+        col_img, col_interp = st.columns([1, 1])
+
+        with col_img:
+            st.image(
+                arr,
+                caption=(
+                    f"Sentinel-2 true-color — {r_reg} — {metadata['date']} "
+                    f"(cloud {metadata['cloud_cover']:.1f}%)"
+                ),
+                use_container_width=True,
+            )
+            st.markdown("**Scene details**")
+            st.markdown(f"- **Acquired:** {metadata['date']}")
+            st.markdown(f"- **Cloud cover:** {metadata['cloud_cover']:.1f}%")
+            st.markdown(f"- **Sensor:** Sentinel-2 L2A")
+            st.markdown(f"- **Bands:** B4 (Red), B3 (Green), B2 (Blue) — true color")
+            st.markdown(f"- **Scene ID:** `{metadata['scene_id'][:40]}...`")
+
+        with col_interp:
+            st.markdown("**🤖 Vision AI Interpretation**")
+            if st.session_state.ii_ai_result:
+                st.markdown(st.session_state.ii_ai_result)
+                model_used = st.session_state.get("ii_ai_model")
+                if model_used:
+                    st.caption(f"Vision AI response from **{model_used}**")
+                else:
+                    st.caption("Showing built-in reading guide. Add GEMINI_API_KEY or GROQ_API_KEY to enable AI.")
+
+    else:
+        st.markdown("---")
+        st.markdown(
+            "**Type a location above, pick a date, then click Analyse.**\n\n"
+            "The module will find the best available Sentinel-2 scene near your target date "
+            "and ask a vision AI to describe what it sees."
+        )
+
+    st.stop()
+
+# ---------------------------------------------------------------------------
+# MODULE 0 — Welcome panel (default when Welcome is selected)
+# ---------------------------------------------------------------------------
+
+st.markdown("## Welcome to the EOIL Portal")
+st.markdown(
+    "This portal is a working demonstration of AI-native Earth observation analysis. "
+    "It pulls real satellite data from ESA, NASA, and Google Earth Engine."
 )
 
-if st.button("Ask", type="primary", key="tab1_ask"):
-    if user_question.strip():
-        with st.spinner("Thinking..."):
-            try:
-                response = ai_assistant.ask(
-                    question=user_question,
-                    theme=selected_theme,
-                    dataset=selected_dataset,
-                    location=selected_location,
-                    mode=selected_ai_mode,
-                )
-                st.markdown(response)
-            except Exception as e:
-                st.error(f"AI call failed: {e}")
-    else:
-        st.warning("Type a question before submitting.")
-else:
-    # Show a static prompt instead of making a live AI call on every render.
-    # Auto-calling AI on every render was causing the app to hang on load.
-    st.caption("Type a question above and click Ask to get an AI response.")
+st.divider()
+
+st.markdown("### What you can do here")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("#### 🔬 Spectral Explorer")
+    st.markdown(
+        "Fetch real satellite imagery from NASA and ESA archives for any location. "
+        "Render the same scene through different spectral band combinations — "
+        "vegetation health, water extent, urban heat, burn scars, and more. "
+        "Compare all views side by side."
+    )
+    st.markdown("**Sensor:** Sentinel-2, Landsat 8/9")
+    st.markdown("**Data:** Planetary Computer (Microsoft)")
+    st.markdown("**Question:** What can satellites see that cameras cannot?")
+
+with col2:
+    st.markdown("#### 📈 Time Series Explorer")
+    st.markdown(
+        "Pull 10+ years of satellite measurements for any location on Earth. "
+        "See how vegetation greenness or land surface temperature has shifted "
+        "over time. Trend analysis, seasonal cycles, and annual comparison charts."
+    )
+    st.markdown("**Sensor:** MODIS Terra, Landsat 8")
+    st.markdown("**Data:** Google Earth Engine")
+    st.markdown("**Question:** How has this location changed over time?")
+
+with col3:
+    st.markdown("#### 📡 SAR Explorer")
+    st.markdown(
+        "Analyse Sentinel-1 radar data for any location and two dates. "
+        "SAR works through clouds and at night — it reveals ships, infrastructure, "
+        "and surface change that optical sensors miss. VV, VH, false color, "
+        "and change maps included."
+    )
+    st.markdown("**Sensor:** Sentinel-1 GRD (ESA / Copernicus)")
+    st.markdown("**Data:** Google Earth Engine")
+    st.markdown("**Question:** What can radar see that cameras cannot?")
+
+st.divider()
+
+col4, col5 = st.columns(2)
+
+with col4:
+    st.markdown("#### 🔀 Change Detection")
+    st.markdown(
+        "Select any location and two dates. The module computes the NDVI difference "
+        "between the two dates and shows where vegetation increased or decreased. "
+        "Interactive change map with toggleable layers and AI interpretation."
+    )
+    st.markdown("**Sensor:** Sentinel-2 SR, MODIS (fallback)")
+    st.markdown("**Data:** Google Earth Engine")
+    st.markdown("**Question:** What changed between two dates?")
+
+with col5:
+    st.markdown("#### 🔍 AI Imagery Interpreter")
+    st.markdown(
+        "Pick any location and date. The module fetches a Sentinel-2 true-color chip "
+        "and passes it directly to a vision AI. The AI reads the image and describes "
+        "land cover, notable features, seasonal state, and decision applications."
+    )
+    st.markdown("**Sensor:** Sentinel-2 L2A")
+    st.markdown("**Data:** Planetary Computer (Microsoft)")
+    st.markdown("**Question:** What does this place look like — and what does it mean?")
+
+st.divider()
+
+st.markdown("### How to get started")
+st.markdown(
+    "Use the **sidebar on the left** to navigate between modules. "
+    "Each module has an info panel that explains what it does and how to use it. "
+    "All modules pull live data — nothing here is simulated."
+)
+
+st.divider()
+
+st.markdown("### About this portal")
+col_a, col_b = st.columns(2)
+
+with col_a:
+    st.markdown(
+        "The EOIL Portal is built as part of the AI-Native Earth Observation "
+        "Innovation Lab — a 30-day program to rebuild satellite data analysis skills "
+        "and integrate modern AI into every workflow."
+    )
+
+with col_b:
+    st.markdown("**Technology stack:**")
+    st.markdown("- Streamlit — app framework")
+    st.markdown("- Google Earth Engine — satellite data processing at scale")
+    st.markdown("- Planetary Computer — optical satellite archive")
+    st.markdown("- Groq + Gemini — 11-model text chain, 8-model vision chain")
+    st.markdown("- Folium / Plotly — interactive maps and charts")
+
+st.divider()
+st.caption(
+    "EOIL Portal v1.7 — Earth Observation Innovation Lab. "
+    "Built with Claude Code. "
+    "Login and access controls will be added in a future version."
+)
