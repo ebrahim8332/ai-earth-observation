@@ -1655,7 +1655,7 @@ for significant change in this module.
         else:
             with st.spinner("Computing change statistics..."):
                 diff_img = img2.subtract(img1).rename("NDVI_diff")
-                stats = gee_change.compute_change_stats(diff_img, p["bbox"], gee_available)
+                stats = gee_change.compute_change_stats(img1, img2, diff_img, p["bbox"], gee_available)
 
             with st.spinner("Building change map (20-40 seconds)..."):
                 cd_map = gee_change.build_change_map(
@@ -1690,18 +1690,85 @@ for significant change in this module.
         # --- SECTION 1: Summary statistics ---
         st.subheader("📊 Change Statistics")
 
+        # Row 1: Headline change numbers
         c1, c2, c3, c4 = st.columns(4)
         delta_color = "normal" if stats["mean_change"] >= 0 else "inverse"
-        c1.metric("Mean NDVI change", f"{stats['mean_change']:+.4f}",
-                  delta="Greening" if stats["mean_change"] > 0 else "Browning",
-                  delta_color=delta_color)
-        c2.metric(f"Gain area (>{gee_change.CHANGE_THRESHOLD} NDVI)",
-                  f"{stats['area_gain_km2']:,.0f} km²",
-                  delta=f"{stats['pct_gain']:.1f}% of region")
-        c3.metric(f"Loss area (<-{gee_change.CHANGE_THRESHOLD} NDVI)",
-                  f"{stats['area_loss_km2']:,.0f} km²",
-                  delta=f"{stats['pct_loss']:.1f}% of region")
-        c4.metric("Total area analysed", f"{stats['area_total_km2']:,.0f} km²")
+        c1.metric(
+            "Mean NDVI change",
+            f"{stats['mean_change']:+.4f}",
+            delta="Greening" if stats["mean_change"] > 0 else "Browning",
+            delta_color=delta_color,
+        )
+        c2.metric(
+            "NDVI — Date 1 (baseline)",
+            f"{stats['mean_ndvi1']:.3f}",
+        )
+        c3.metric(
+            "NDVI — Date 2 (endpoint)",
+            f"{stats['mean_ndvi2']:.3f}",
+            delta=f"{stats['mean_change']:+.3f}",
+            delta_color=delta_color,
+        )
+        c4.metric(
+            "Spatial variability (std dev)",
+            f"{stats['std_change']:.4f}",
+            help="Low = uniform change (typically seasonal). High = patchy change (fire, clearing, flood).",
+        )
+
+        st.markdown("")
+
+        # Row 2: Area breakdown
+        thr = gee_change.CHANGE_THRESHOLD
+        ext = gee_change.EXTREME_THRESHOLD
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric(
+            f"🟢 Gain area (>{thr} NDVI)",
+            f"{stats['area_gain_km2']:,.0f} km²",
+            delta=f"{stats['pct_gain']:.1f}% of region",
+        )
+        a2.metric(
+            f"🔴 Loss area (<-{thr} NDVI)",
+            f"{stats['area_loss_km2']:,.0f} km²",
+            delta=f"{stats['pct_loss']:.1f}% of region",
+        )
+        a3.metric(
+            "⬜ Stable area",
+            f"{stats['area_stable_km2']:,.0f} km²",
+            delta=f"{stats['pct_stable']:.1f}% of region",
+        )
+        a4.metric(
+            "Total area analysed",
+            f"{stats['area_total_km2']:,.0f} km²",
+        )
+
+        st.markdown("")
+
+        # Row 3: Derived indicators
+        ratio = stats["gain_loss_ratio"]
+        ratio_str = f"{ratio:.2f}×" if ratio is not None else "∞ (no loss)"
+        net_dir   = "net gain" if stats["net_change_km2"] >= 0 else "net loss"
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric(
+            "Net change (gain − loss)",
+            f"{stats['net_change_km2']:+,.0f} km²",
+            delta=net_dir,
+            delta_color="normal" if stats["net_change_km2"] >= 0 else "inverse",
+        )
+        b2.metric(
+            "Gain / Loss ratio",
+            ratio_str,
+            help=">1 means more land gained vegetation than lost it.",
+        )
+        b3.metric(
+            f"⚡ Extreme gain (>{ext} NDVI)",
+            f"{stats['area_extreme_gain_km2']:,.0f} km²",
+            help=f"Area where NDVI increased by more than {ext} — regrowth, crop establishment, or post-rain flush.",
+        )
+        b4.metric(
+            f"⚡ Extreme loss (<-{ext} NDVI)",
+            f"{stats['area_extreme_loss_km2']:,.0f} km²",
+            help=f"Area where NDVI dropped by more than {ext} — likely fire, clearcut, or severe drought.",
+        )
 
         cd_section_break()
 

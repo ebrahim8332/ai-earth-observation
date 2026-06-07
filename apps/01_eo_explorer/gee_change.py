@@ -137,17 +137,33 @@ def fetch_ndvi_image(bbox, date_str, gee_available):
 # Change statistics
 # ---------------------------------------------------------------------------
 
-def compute_change_stats(diff_image, bbox, gee_available):
+EXTREME_THRESHOLD = 0.3   # NDVI change magnitude considered dramatic (fire, flood, clearcut)
+
+
+def compute_change_stats(img1, img2, diff_image, bbox, gee_available):
     """Compute summary statistics from the NDVI difference image.
 
+    Takes img1 and img2 (the raw NDVI composites) in addition to the diff image
+    so we can compute per-date baseline means.
+
     Returns a dict with:
-      mean_change:    mean NDVI difference across the region (float)
-      area_gain_km2:  area where NDVI diff > +CHANGE_THRESHOLD (km2)
-      area_loss_km2:  area where NDVI diff < -CHANGE_THRESHOLD (km2)
-      area_stable_km2 area where |NDVI diff| <= CHANGE_THRESHOLD (km2)
-      pct_gain:       percentage of total area that gained
-      pct_loss:       percentage of total area that lost
-      threshold:      the threshold used (for display)
+      mean_change:          mean NDVI diff across the region
+      mean_ndvi1:           mean NDVI on Date 1 (baseline)
+      mean_ndvi2:           mean NDVI on Date 2 (endpoint)
+      std_change:           standard deviation of NDVI diff (spatial variability)
+      net_change_km2:       area_gain minus area_loss
+      gain_loss_ratio:      area_gain / area_loss (>1 = net greening)
+      area_gain_km2:        area where diff > +CHANGE_THRESHOLD
+      area_loss_km2:        area where diff < -CHANGE_THRESHOLD
+      area_stable_km2:      area where |diff| <= CHANGE_THRESHOLD
+      area_extreme_gain_km2 area where diff > +EXTREME_THRESHOLD
+      area_extreme_loss_km2 area where diff < -EXTREME_THRESHOLD
+      area_total_km2:       total analysed area
+      pct_gain:             gain area as % of total
+      pct_loss:             loss area as % of total
+      pct_stable:           stable area as % of total
+      threshold:            moderate change threshold used
+      extreme_threshold:    extreme change threshold used
     """
     if not gee_available or diff_image is None:
         return _empty_stats()
@@ -158,49 +174,82 @@ def compute_change_stats(diff_image, bbox, gee_available):
         bbox     = _pad_bbox(bbox)
         geometry = ee.Geometry.Rectangle(bbox)
 
-        # Mean change across the whole region
-        mean_result = diff_image.reduceRegion(
-            reducer=ee.Reducer.mean(),
+        # ---------------------------------------------------------------
+        # Single combined reduceRegion call for all scalar stats.
+        # Combining mean + stdDev into one call avoids multiple round-trips
+        # to the GEE API, which significantly speeds up this step.
+        # ---------------------------------------------------------------
+        combined = diff_image.rename("diff").addBands(
+            img1.rename("ndvi1")
+        ).addBands(
+            img2.rename("ndvi2")
+        )
+
+        scalar_result = combined.reduceRegion(
+            reducer=ee.Reducer.mean().combine(
+                ee.Reducer.stdDev(), sharedInputs=False
+            ),
             geometry=geometry,
             scale=STATS_SCALE,
             maxPixels=1e8,
         ).getInfo()
-        mean_change = float(mean_result.get("NDVI_diff") or mean_result.get("NDVI") or 0)
 
-        # Count pixels in each change category
-        # We create a classification image: 1=gain, 0=stable, -1=loss
-        gain_mask   = diff_image.gt(CHANGE_THRESHOLD)
-        loss_mask   = diff_image.lt(-CHANGE_THRESHOLD)
-        stable_mask = gain_mask.Not().And(loss_mask.Not())
+        mean_change = float(scalar_result.get("diff_mean") or 0)
+        std_change  = float(scalar_result.get("diff_stdDev") or 0)
+        mean_ndvi1  = float(scalar_result.get("ndvi1_mean") or 0)
+        mean_ndvi2  = float(scalar_result.get("ndvi2_mean") or 0)
 
-        def count_pixels(mask):
-            """Count pixels where mask == 1 and convert to km2."""
+        # ---------------------------------------------------------------
+        # Area calculations — one pixelArea sum per mask
+        # ---------------------------------------------------------------
+        gain_mask         = diff_image.gt(CHANGE_THRESHOLD)
+        loss_mask         = diff_image.lt(-CHANGE_THRESHOLD)
+        stable_mask       = gain_mask.Not().And(loss_mask.Not())
+        extreme_gain_mask = diff_image.gt(EXTREME_THRESHOLD)
+        extreme_loss_mask = diff_image.lt(-EXTREME_THRESHOLD)
+
+        def area_km2(mask):
+            """Sum pixel area in km² for pixels where mask == 1."""
             result = mask.multiply(ee.Image.pixelArea()).reduceRegion(
                 reducer=ee.Reducer.sum(),
                 geometry=geometry,
                 scale=STATS_SCALE,
                 maxPixels=1e8,
             ).getInfo()
-            area_m2 = list(result.values())[0] or 0
-            return float(area_m2) / 1e6   # convert m2 to km2
+            return float(list(result.values())[0] or 0) / 1e6
 
-        area_gain   = count_pixels(gain_mask)
-        area_loss   = count_pixels(loss_mask)
-        area_stable = count_pixels(stable_mask)
-        area_total  = area_gain + area_loss + area_stable
+        area_gain         = area_km2(gain_mask)
+        area_loss         = area_km2(loss_mask)
+        area_stable       = area_km2(stable_mask)
+        area_extreme_gain = area_km2(extreme_gain_mask)
+        area_extreme_loss = area_km2(extreme_loss_mask)
+        area_total        = area_gain + area_loss + area_stable
 
-        pct_gain = (area_gain   / area_total * 100) if area_total > 0 else 0
-        pct_loss = (area_loss   / area_total * 100) if area_total > 0 else 0
+        pct_gain   = (area_gain   / area_total * 100) if area_total > 0 else 0
+        pct_loss   = (area_loss   / area_total * 100) if area_total > 0 else 0
+        pct_stable = (area_stable / area_total * 100) if area_total > 0 else 0
+
+        net_change     = area_gain - area_loss
+        gain_loss_ratio = (area_gain / area_loss) if area_loss > 0 else None
 
         return {
-            "mean_change":     round(mean_change, 4),
-            "area_gain_km2":   round(area_gain,   0),
-            "area_loss_km2":   round(area_loss,   0),
-            "area_stable_km2": round(area_stable, 0),
-            "area_total_km2":  round(area_total,  0),
-            "pct_gain":        round(pct_gain,    1),
-            "pct_loss":        round(pct_loss,    1),
-            "threshold":       CHANGE_THRESHOLD,
+            "mean_change":           round(mean_change,        4),
+            "mean_ndvi1":            round(mean_ndvi1,         3),
+            "mean_ndvi2":            round(mean_ndvi2,         3),
+            "std_change":            round(std_change,         4),
+            "net_change_km2":        round(net_change,         0),
+            "gain_loss_ratio":       round(gain_loss_ratio, 2) if gain_loss_ratio is not None else None,
+            "area_gain_km2":         round(area_gain,          0),
+            "area_loss_km2":         round(area_loss,          0),
+            "area_stable_km2":       round(area_stable,        0),
+            "area_extreme_gain_km2": round(area_extreme_gain,  0),
+            "area_extreme_loss_km2": round(area_extreme_loss,  0),
+            "area_total_km2":        round(area_total,         0),
+            "pct_gain":              round(pct_gain,           1),
+            "pct_loss":              round(pct_loss,           1),
+            "pct_stable":            round(pct_stable,         1),
+            "threshold":             CHANGE_THRESHOLD,
+            "extreme_threshold":     EXTREME_THRESHOLD,
         }
 
     except Exception as e:
@@ -211,14 +260,23 @@ def compute_change_stats(diff_image, bbox, gee_available):
 def _empty_stats():
     """Return a zeroed stats dict when GEE is unavailable."""
     return {
-        "mean_change":     0.0,
-        "area_gain_km2":   0.0,
-        "area_loss_km2":   0.0,
-        "area_stable_km2": 0.0,
-        "area_total_km2":  0.0,
-        "pct_gain":        0.0,
-        "pct_loss":        0.0,
-        "threshold":       CHANGE_THRESHOLD,
+        "mean_change":           0.0,
+        "mean_ndvi1":            0.0,
+        "mean_ndvi2":            0.0,
+        "std_change":            0.0,
+        "net_change_km2":        0.0,
+        "gain_loss_ratio":       None,
+        "area_gain_km2":         0.0,
+        "area_loss_km2":         0.0,
+        "area_stable_km2":       0.0,
+        "area_extreme_gain_km2": 0.0,
+        "area_extreme_loss_km2": 0.0,
+        "area_total_km2":        0.0,
+        "pct_gain":              0.0,
+        "pct_loss":              0.0,
+        "pct_stable":            0.0,
+        "threshold":             CHANGE_THRESHOLD,
+        "extreme_threshold":     EXTREME_THRESHOLD,
     }
 
 
@@ -330,15 +388,21 @@ def get_change_interpretation(stats, date1, date2, region, src1, src2, api_key=N
             from groq import Groq
             client = Groq(api_key=api_key)
 
+            ratio_str = f"{stats['gain_loss_ratio']:.2f}" if stats["gain_loss_ratio"] is not None else "N/A (no loss)"
             prompt = (
                 f"You are an Earth observation analyst. "
                 f"Interpret the following NDVI change detection result for {region}.\n\n"
-                f"Date 1: {date1} (data source: {src1})\n"
-                f"Date 2: {date2} (data source: {src2})\n\n"
+                f"Date 1: {date1} (data source: {src1}) — mean NDVI: {stats['mean_ndvi1']:.3f}\n"
+                f"Date 2: {date2} (data source: {src2}) — mean NDVI: {stats['mean_ndvi2']:.3f}\n\n"
                 f"Mean NDVI change: {stats['mean_change']:+.4f}\n"
+                f"Std deviation of change: {stats['std_change']:.4f} (low = uniform/seasonal, high = patchy/human activity)\n"
+                f"Net change: {stats['net_change_km2']:+,.0f} km2 (gain minus loss)\n"
+                f"Gain / Loss ratio: {ratio_str}\n\n"
                 f"Area of significant gain (>{CHANGE_THRESHOLD} NDVI): {stats['area_gain_km2']:,.0f} km2 ({stats['pct_gain']:.1f}%)\n"
                 f"Area of significant loss (<-{CHANGE_THRESHOLD} NDVI): {stats['area_loss_km2']:,.0f} km2 ({stats['pct_loss']:.1f}%)\n"
-                f"Stable area: {stats['area_stable_km2']:,.0f} km2\n\n"
+                f"Stable area: {stats['area_stable_km2']:,.0f} km2 ({stats['pct_stable']:.1f}%)\n"
+                f"Extreme gain area (>{EXTREME_THRESHOLD} NDVI): {stats['area_extreme_gain_km2']:,.0f} km2\n"
+                f"Extreme loss area (<-{EXTREME_THRESHOLD} NDVI): {stats['area_extreme_loss_km2']:,.0f} km2\n\n"
                 f"Cover the following in 3-4 short paragraphs:\n"
                 f"1. What the numbers show — net greening or browning, and how large is the change.\n"
                 f"2. The most likely causes — consider season, land use, climate, and whether the dates span different seasons.\n"
