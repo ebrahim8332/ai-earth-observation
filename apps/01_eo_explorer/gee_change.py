@@ -175,29 +175,39 @@ def compute_change_stats(img1, img2, diff_image, bbox, gee_available):
         geometry = ee.Geometry.Rectangle(bbox)
 
         # ---------------------------------------------------------------
-        # Single combined reduceRegion call for all scalar stats.
-        # Combining mean + stdDev into one call avoids multiple round-trips
-        # to the GEE API, which significantly speeds up this step.
+        # Scalar stats — two separate reduceRegion calls.
+        #
+        # Call 1: mean and std dev of the diff image.
+        #   Reducer.mean().combine(stdDev, sharedInputs=True) works on a
+        #   single-band image — both reducers share the same input band.
+        #
+        # Call 2: mean NDVI for each date separately.
+        #   Stack ndvi1 and ndvi2 as two bands, reduce with mean().
         # ---------------------------------------------------------------
-        combined = diff_image.rename("diff").addBands(
-            img1.rename("ndvi1")
-        ).addBands(
-            img2.rename("ndvi2")
-        )
 
-        scalar_result = combined.reduceRegion(
+        # Call 1 — diff mean and std dev
+        diff_stats = diff_image.rename("diff").reduceRegion(
             reducer=ee.Reducer.mean().combine(
-                ee.Reducer.stdDev(), sharedInputs=False
+                ee.Reducer.stdDev(), sharedInputs=True
             ),
             geometry=geometry,
             scale=STATS_SCALE,
             maxPixels=1e8,
         ).getInfo()
 
-        mean_change = float(scalar_result.get("diff_mean") or 0)
-        std_change  = float(scalar_result.get("diff_stdDev") or 0)
-        mean_ndvi1  = float(scalar_result.get("ndvi1_mean") or 0)
-        mean_ndvi2  = float(scalar_result.get("ndvi2_mean") or 0)
+        mean_change = float(diff_stats.get("diff_mean")   or 0)
+        std_change  = float(diff_stats.get("diff_stdDev") or 0)
+
+        # Call 2 — baseline NDVI means for both dates
+        ndvi_stats = img1.rename("ndvi1").addBands(img2.rename("ndvi2")).reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=geometry,
+            scale=STATS_SCALE,
+            maxPixels=1e8,
+        ).getInfo()
+
+        mean_ndvi1 = float(ndvi_stats.get("ndvi1") or 0)
+        mean_ndvi2 = float(ndvi_stats.get("ndvi2") or 0)
 
         # ---------------------------------------------------------------
         # Area calculations — one pixelArea sum per mask
