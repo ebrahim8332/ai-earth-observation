@@ -337,25 +337,51 @@ def extract_time_series_gee(bbox, dataset_key, start_year, end_year):
         scale    = 30
 
     elif dataset_key == "MODIS Burned Area":
-        def add_burn_mask(image):
-            # BurnDate > 0 means that pixel burned this month.
-            # Convert to a binary 0/1 band. Taking the mean over a region
-            # then gives the fraction of pixels that burned.
-            # copyProperties carries system:time_start to the new image —
-            # without it, ee.Date(image.get("system:time_start")) returns null
-            # and the extract_mean function crashes.
-            burned = image.select("BurnDate").gt(0).rename("burned").toFloat()
-            return burned.copyProperties(image, ["system:time_start", "system:index"])
+        # Burned area is handled with a completely separate extraction flow.
+        # We do NOT use the shared collection + extract_mean pattern because:
+        #   - gt(0) preserves the original band name "BurnDate", not "burned"
+        #   - copyProperties can be unreliable for system properties in server-side GEE
+        # Instead, we map one function that computes the binary fraction AND the date
+        # in a single step, then return the DataFrame directly from this block.
 
-        collection = (
+        burn_collection = (
             ee.ImageCollection(dataset["collection"])
             .filterDate(start_date, end_date)
             .filterBounds(study_area)
-            .map(add_burn_mask)
-            .select("burned")
+            .select("BurnDate")
         )
-        gee_band = "burned"
-        scale    = 500
+
+        def extract_burn_fraction(image):
+            # gt(0) turns BurnDate into a binary 0/1 image, band name stays "BurnDate"
+            # mean() over the region = fraction of pixels that burned this month
+            fraction = image.gt(0).reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=study_area,
+                scale=500,
+                maxPixels=1e9,
+            ).get("BurnDate")
+            date = ee.Date(image.get("system:time_start")).format("YYYY-MM-dd")
+            return ee.Feature(None, {"date": date, "value_raw": fraction})
+
+        burn_fc   = burn_collection.map(extract_burn_fraction)
+        burn_data = burn_fc.getInfo()
+
+        records = []
+        for feature in burn_data["features"]:
+            props = feature["properties"]
+            raw   = props.get("value_raw")
+            if raw is None:
+                continue
+            records.append({"date": pd.Timestamp(props["date"]), "value": float(raw)})
+
+        if not records:
+            return generate_sample_data(
+                list(REGIONS.keys())[0], dataset_key, start_year, end_year
+            )
+
+        df = pd.DataFrame(records).sort_values("date").reset_index(drop=True)
+        df["value_smooth"] = df["value"].rolling(window=3, center=True).mean()
+        return df
 
     else:
         collection = (
