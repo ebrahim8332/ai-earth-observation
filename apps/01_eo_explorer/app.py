@@ -1518,25 +1518,88 @@ It fetches Sentinel-2 satellite imagery for two dates and computes the NDVI diff
 a pixel-by-pixel comparison of vegetation greenness. Where NDVI increased, vegetation
 grew or recovered. Where NDVI decreased, vegetation died, burned, or was removed.
 
-**What you will see after running an analysis:**
-
-- **Summary statistics** — mean NDVI change, area of significant gain, area of significant loss
-- **Interactive change map** — three toggleable layers: NDVI Date 1, NDVI Date 2, and the change map
-  (green = gain, red = loss, white = no change). Toggle layers using the control in the top-right corner.
-- **AI interpretation** — plain-language explanation of what likely caused the change
-
 **How to use it:**
 
 1. Type any location in the search box
 2. Pick two dates (the module searches a 30-day window around each date for cloud-free imagery)
 3. Click Run Analysis
 
-**Data source:** Sentinel-2 Surface Reflectance (COPERNICUS/S2_SR_HARMONIZED) via Google Earth Engine.
+**Data source:** Sentinel-2 Surface Reflectance via Google Earth Engine.
 MODIS is used as a fallback if Sentinel-2 has insufficient cloud-free coverage.
 
-**NDVI:** Normalized Difference Vegetation Index = (NIR - Red) / (NIR + Red).
-Values range from 0 (bare soil) to 0.9 (dense forest). A change of ±0.1 is the threshold
-for significant change in this module.
+---
+
+**What is NDVI?**
+
+NDVI stands for Normalized Difference Vegetation Index. It is the most widely used
+measure of vegetation health from satellite data.
+
+Formula: **(NIR − Red) / (NIR + Red)**
+
+Healthy plants absorb red light for photosynthesis and reflect near-infrared strongly.
+Bare soil reflects both at similar levels. Water absorbs both almost completely.
+
+| Surface | Typical NDVI |
+|---|---|
+| Dense healthy forest | 0.6 – 0.9 |
+| Crops mid-season | 0.4 – 0.7 |
+| Sparse or stressed vegetation | 0.2 – 0.4 |
+| Bare soil | 0.1 – 0.2 |
+| Water | 0 or negative |
+
+---
+
+**How to read the statistics**
+
+**Mean NDVI — Date 1 and Date 2 (baseline and endpoint)**
+These are the average NDVI values across the whole region for each date.
+They give the change context. A shift of +0.3 from a baseline of 0.1 (bare soil recovering)
+is very different from +0.3 from a baseline of 0.5 (already-dense forest getting denser).
+Without the baseline, the difference alone can mislead.
+
+**Mean NDVI change**
+The average pixel-by-pixel difference: Date 2 minus Date 1.
+Positive = net greening across the region. Negative = net browning.
+
+**Spatial variability (standard deviation of change)**
+This is the single most diagnostic number for understanding *why* a region changed.
+A low standard deviation means every pixel moved in the same direction by roughly the same
+amount — almost always a seasonal signal (wet season arriving, dry season setting in).
+A high standard deviation means change is concentrated in patches — more likely fire,
+deforestation, flood inundation, or agricultural clearing.
+
+**Net change (gain area minus loss area)**
+One number for a briefing headline. Tells you whether the region is net gaining or
+net losing vegetation, in km².
+
+**Gain / Loss ratio**
+Gain area divided by loss area. Above 1 means more land gained vegetation than lost it.
+Below 1 means the opposite. Useful for comparing regions or time periods.
+
+**Gain and Loss areas (±0.1 threshold)**
+Area in km² where NDVI changed by more than ±0.1. This threshold separates real
+vegetation change from sensor noise and minor cloud contamination artefacts.
+
+**Stable area**
+Area where NDVI changed by less than ±0.1. This is the land that did not meaningfully
+change between the two dates.
+
+**Extreme gain and Extreme loss (±0.3 threshold)**
+Area where NDVI changed by more than ±0.3. This separates dramatic events from ordinary
+seasonal movement. Large extreme gain areas suggest post-fire regrowth, crop establishment
+after irrigation, or a very strong wet season flush. Large extreme loss areas suggest
+fire, clearcut deforestation, or severe drought stress.
+
+---
+
+**Change map colour guide**
+
+- 🟢 **Green** — vegetation increased between Date 1 and Date 2
+- 🔴 **Red** — vegetation decreased
+- ⬜ **White** — no significant change
+
+Toggle between NDVI Date 1, NDVI Date 2, and the change map using the layer control
+in the top-right corner of the map.
         """)
 
     # --- Controls ---
