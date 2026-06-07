@@ -1,6 +1,6 @@
 """
 gee_change.py — Change Detection portal module
-Logic mirrors the mechanics taught in notebooks/change_detection_demo.ipynb
+Logic mirrors the mechanics taught in notebooks/04_change_detection.ipynb
 
 This module provides:
 - Sentinel-2 NDVI compositing from GEE for two user-selected dates
