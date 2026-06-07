@@ -104,6 +104,97 @@ DATASETS = {
         "gibs_layer":    "MODIS_Terra_NDVI_8Day",   # use MODIS as visual proxy
         "chart_color":   "#1a7a4a",
     },
+    "MODIS EVI": {
+        # Enhanced Vegetation Index — same collection as NDVI, different band.
+        # EVI adds a soil adjustment factor and atmospheric correction term so it
+        # does not saturate in dense tropical forest the way NDVI does.
+        "collection":    "MODIS/061/MOD13Q1",
+        "band":          "EVI",
+        "scale_factor":  10000.0,
+        "convert":       "divide",
+        "cadence_days":  16,
+        "resolution":    "250 m",
+        "revisit":       "16 days",
+        "sensor":        "MODIS Terra (NASA)",
+        "available_from": "2000",
+        "unit":          "EVI",
+        "value_range":   "0 to 1 — dense forest: 0.4-0.6, crops: 0.2-0.5, bare soil: 0.05-0.15",
+        "measures": (
+            "Vegetation greenness with reduced saturation in dense canopy. "
+            "EVI = 2.5 * (NIR - Red) / (NIR + 6*Red - 7.5*Blue + 1). "
+            "The extra terms correct for soil background and atmospheric aerosol. "
+            "Shows more within-canopy variation than NDVI in tropical forests."
+        ),
+        "best_for":      "Tropical forest monitoring, dense crop canopy, regions with atmospheric haze",
+        "limitation": (
+            "Same 250 m spatial resolution as MODIS NDVI. "
+            "Requires a blue band — noisier in high aerosol conditions. "
+            "Values slightly lower than NDVI for the same vegetation density."
+        ),
+        "gibs_layer":    "MODIS_Terra_NDVI_8Day",   # visual proxy — no EVI-specific GIBS layer
+        "chart_color":   "#2e8b57",
+    },
+    "Landsat NDWI": {
+        # Normalized Difference Water Index — highlights open water and surface wetness.
+        # NDWI = (Green - NIR) / (Green + NIR)
+        # Positive values: water or very wet surfaces.
+        # Negative values: dry land, vegetation, or bare soil.
+        "collection":    "LANDSAT/LC08/C02/T1_L2",
+        "band":          "NDWI",        # computed from SR_B3 (Green) and SR_B5 (NIR) in GEE
+        "scale_factor":  1.0,
+        "convert":       "direct",
+        "cadence_days":  16,
+        "resolution":    "30 m",
+        "revisit":       "16 days",
+        "sensor":        "Landsat 8 (USGS/NASA)",
+        "available_from": "2013",
+        "unit":          "NDWI",
+        "value_range":   "-1 to +1 — open water: 0.3 to 1.0, wet soil: 0.0 to 0.3, dry land: -0.5 to 0.0",
+        "measures": (
+            "Surface water presence and soil moisture. "
+            "Computed as (Green minus NIR) divided by (Green plus NIR). "
+            "Water bodies reflect green light and absorb NIR. Land does the opposite. "
+            "Tracks seasonal flooding, drought-driven lake shrinkage, and wetland extent."
+        ),
+        "best_for":      "Flood mapping, reservoir monitoring, wetland extent, drought-driven water loss",
+        "limitation": (
+            "Dense vegetation with high NIR can suppress NDWI even where soil is wet. "
+            "Urban surfaces with concrete produce low NDWI similar to dry soil. "
+            "Cloud gaps are frequent; 16-day revisit limits flood event capture."
+        ),
+        "gibs_layer":    "MODIS_Terra_NDVI_8Day",   # visual proxy
+        "chart_color":   "#1e90ff",
+    },
+    "MODIS Burned Area": {
+        # MCD64A1: monthly burned area product combining Terra and Aqua.
+        # BurnDate band = day of year the pixel burned (1-366), 0 = not burned.
+        # We convert to a fraction: mean of a 0/1 burn mask = fraction of area burned.
+        "collection":    "MODIS/061/MCD64A1",
+        "band":          "BurnDate",    # converted to binary burn mask in GEE
+        "scale_factor":  1.0,
+        "convert":       "direct",      # GEE returns fraction 0-1 after binary mask
+        "cadence_days":  30,
+        "resolution":    "500 m",
+        "revisit":       "Monthly",
+        "sensor":        "MODIS Terra + Aqua (NASA)",
+        "available_from": "2000",
+        "unit":          "Fraction burned",
+        "value_range":   "0 to 1 — 0: no burning detected, 0.05: 5% of area burned that month",
+        "measures": (
+            "Fraction of the study area that burned each month. "
+            "Based on active fire detections and post-fire reflectance change. "
+            "Values are near zero most months; spikes indicate fire events. "
+            "Tracks seasonal fire cycles, landscape clearing, and interannual fire variability."
+        ),
+        "best_for":      "Fire season monitoring, deforestation by burning, carbon flux estimation",
+        "limitation": (
+            "Small fires below 500 m are missed entirely. "
+            "Smouldering fires with little surface change are underdetected. "
+            "Monthly compositing misses fires that start and recover within the same month."
+        ),
+        "gibs_layer":    "MODIS_Terra_NDVI_8Day",   # visual proxy
+        "chart_color":   "#ff4500",
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -205,7 +296,10 @@ def extract_time_series_gee(bbox, dataset_key, start_year, end_year):
     end_date   = f"{end_year}-12-31"
     study_area = ee.Geometry.Rectangle(bbox)
 
-    # Landsat NDVI: compute the index inside GEE before selecting the band
+    # Datasets that need custom band computation inside GEE before extraction.
+    # Landsat NDVI and NDWI both require applying the Collection 2 scale factor
+    # and then computing a normalised difference.
+    # Burned Area needs the BurnDate band converted to a 0/1 binary mask.
     if dataset_key == "Landsat NDVI":
         def add_ndvi(image):
             # Apply Collection 2 scale factor before computing the ratio
@@ -223,6 +317,43 @@ def extract_time_series_gee(bbox, dataset_key, start_year, end_year):
         )
         gee_band = "NDVI"
         scale    = 30
+
+    elif dataset_key == "Landsat NDWI":
+        def add_ndwi(image):
+            # NDWI = (Green - NIR) / (Green + NIR)
+            # Landsat 8 Collection 2: SR_B3 = Green, SR_B5 = NIR
+            scaled = image.multiply(0.0000275).add(-0.2)
+            ndwi   = scaled.normalizedDifference(["SR_B3", "SR_B5"]).rename("NDWI")
+            return image.addBands(ndwi)
+
+        collection = (
+            ee.ImageCollection(dataset["collection"])
+            .filterDate(start_date, end_date)
+            .filterBounds(study_area)
+            .map(add_ndwi)
+            .select("NDWI")
+        )
+        gee_band = "NDWI"
+        scale    = 30
+
+    elif dataset_key == "MODIS Burned Area":
+        def add_burn_mask(image):
+            # BurnDate > 0 means that pixel burned this month.
+            # Convert to a binary 0/1 band. Taking the mean over a region
+            # then gives the fraction of pixels that burned.
+            burned = image.select("BurnDate").gt(0).rename("burned").toFloat()
+            return burned
+
+        collection = (
+            ee.ImageCollection(dataset["collection"])
+            .filterDate(start_date, end_date)
+            .filterBounds(study_area)
+            .map(add_burn_mask)
+            .select("burned")
+        )
+        gee_band = "burned"
+        scale    = 500
+
     else:
         collection = (
             ee.ImageCollection(dataset["collection"])
@@ -281,24 +412,36 @@ def extract_time_series_gee(bbox, dataset_key, start_year, end_year):
 # Other regions are modeled from published MODIS climatology.
 _SAMPLE_PARAMS = {
     "Sahel, West Africa": {
-        "MODIS NDVI":                     {"mean": 0.208, "peak": 0.322, "trough": 0.157, "peak_month": 8, "trend_yr": 0.0034},
-        "MODIS Land Surface Temperature": {"mean": 38.0,  "peak": 46.0,  "trough": 29.0,  "peak_month": 5, "trend_yr": 0.05},
-        "Landsat NDVI":                   {"mean": 0.210, "peak": 0.325, "trough": 0.158, "peak_month": 8, "trend_yr": 0.003},
+        "MODIS NDVI":                     {"mean": 0.208, "peak": 0.322, "trough": 0.157, "peak_month": 8,  "trend_yr":  0.0034},
+        "MODIS Land Surface Temperature": {"mean": 38.0,  "peak": 46.0,  "trough": 29.0,  "peak_month": 5,  "trend_yr":  0.05},
+        "Landsat NDVI":                   {"mean": 0.210, "peak": 0.325, "trough": 0.158, "peak_month": 8,  "trend_yr":  0.003},
+        "MODIS EVI":                      {"mean": 0.175, "peak": 0.270, "trough": 0.120, "peak_month": 8,  "trend_yr":  0.003},
+        "Landsat NDWI":                   {"mean": -0.25, "peak": -0.10, "trough": -0.42, "peak_month": 8,  "trend_yr":  0.001},
+        "MODIS Burned Area":              {"mean": 0.018, "peak": 0.060, "trough": 0.0,   "peak_month": 12, "trend_yr":  0.0},
     },
     "Amazon Basin, Brazil": {
-        "MODIS NDVI":                     {"mean": 0.72,  "peak": 0.78,  "trough": 0.64,  "peak_month": 4, "trend_yr": -0.002},
-        "MODIS Land Surface Temperature": {"mean": 29.0,  "peak": 34.0,  "trough": 25.0,  "peak_month": 9, "trend_yr": 0.03},
-        "Landsat NDVI":                   {"mean": 0.71,  "peak": 0.77,  "trough": 0.63,  "peak_month": 4, "trend_yr": -0.002},
+        "MODIS NDVI":                     {"mean": 0.72,  "peak": 0.78,  "trough": 0.64,  "peak_month": 4,  "trend_yr": -0.002},
+        "MODIS Land Surface Temperature": {"mean": 29.0,  "peak": 34.0,  "trough": 25.0,  "peak_month": 9,  "trend_yr":  0.03},
+        "Landsat NDVI":                   {"mean": 0.71,  "peak": 0.77,  "trough": 0.63,  "peak_month": 4,  "trend_yr": -0.002},
+        "MODIS EVI":                      {"mean": 0.52,  "peak": 0.58,  "trough": 0.45,  "peak_month": 4,  "trend_yr": -0.002},
+        "Landsat NDWI":                   {"mean": 0.05,  "peak": 0.14,  "trough": -0.04, "peak_month": 4,  "trend_yr": -0.001},
+        "MODIS Burned Area":              {"mean": 0.012, "peak": 0.045, "trough": 0.0,   "peak_month": 9,  "trend_yr":  0.001},
     },
     "Siberian Boreal Forest": {
-        "MODIS NDVI":                     {"mean": 0.35,  "peak": 0.68,  "trough": 0.03,  "peak_month": 7, "trend_yr": 0.001},
-        "MODIS Land Surface Temperature": {"mean": 5.0,   "peak": 28.0,  "trough": -22.0, "peak_month": 7, "trend_yr": 0.04},
-        "Landsat NDVI":                   {"mean": 0.34,  "peak": 0.67,  "trough": 0.03,  "peak_month": 7, "trend_yr": 0.001},
+        "MODIS NDVI":                     {"mean": 0.35,  "peak": 0.68,  "trough": 0.03,  "peak_month": 7,  "trend_yr":  0.001},
+        "MODIS Land Surface Temperature": {"mean": 5.0,   "peak": 28.0,  "trough": -22.0, "peak_month": 7,  "trend_yr":  0.04},
+        "Landsat NDVI":                   {"mean": 0.34,  "peak": 0.67,  "trough": 0.03,  "peak_month": 7,  "trend_yr":  0.001},
+        "MODIS EVI":                      {"mean": 0.28,  "peak": 0.55,  "trough": 0.02,  "peak_month": 7,  "trend_yr":  0.001},
+        "Landsat NDWI":                   {"mean": -0.12, "peak": 0.08,  "trough": -0.38, "peak_month": 7,  "trend_yr":  0.001},
+        "MODIS Burned Area":              {"mean": 0.004, "peak": 0.018, "trough": 0.0,   "peak_month": 7,  "trend_yr":  0.0},
     },
     "Great Plains, USA": {
-        "MODIS NDVI":                     {"mean": 0.38,  "peak": 0.62,  "trough": 0.18,  "peak_month": 7, "trend_yr": 0.001},
-        "MODIS Land Surface Temperature": {"mean": 22.0,  "peak": 40.0,  "trough": -5.0,  "peak_month": 7, "trend_yr": 0.02},
-        "Landsat NDVI":                   {"mean": 0.38,  "peak": 0.63,  "trough": 0.18,  "peak_month": 7, "trend_yr": 0.001},
+        "MODIS NDVI":                     {"mean": 0.38,  "peak": 0.62,  "trough": 0.18,  "peak_month": 7,  "trend_yr":  0.001},
+        "MODIS Land Surface Temperature": {"mean": 22.0,  "peak": 40.0,  "trough": -5.0,  "peak_month": 7,  "trend_yr":  0.02},
+        "Landsat NDVI":                   {"mean": 0.38,  "peak": 0.63,  "trough": 0.18,  "peak_month": 7,  "trend_yr":  0.001},
+        "MODIS EVI":                      {"mean": 0.30,  "peak": 0.50,  "trough": 0.13,  "peak_month": 7,  "trend_yr":  0.001},
+        "Landsat NDWI":                   {"mean": -0.20, "peak": -0.04, "trough": -0.38, "peak_month": 7,  "trend_yr":  0.0},
+        "MODIS Burned Area":              {"mean": 0.002, "peak": 0.008, "trough": 0.0,   "peak_month": 4,  "trend_yr":  0.0},
     },
 }
 
@@ -348,11 +491,15 @@ def generate_sample_data(region_name, dataset_key, start_year, end_year):
 
         value = center_val + seasonal + trend + noise
 
-        # Clamp to a physically plausible range
-        if dataset_key in ("MODIS NDVI", "Landsat NDVI"):
+        # Clamp to a physically plausible range for each index type
+        if dataset_key in ("MODIS NDVI", "Landsat NDVI", "MODIS EVI"):
             value = float(np.clip(value, 0.0, 1.0))
         elif dataset_key == "MODIS Land Surface Temperature":
             value = float(np.clip(value, -30.0, 65.0))
+        elif dataset_key == "Landsat NDWI":
+            value = float(np.clip(value, -1.0, 1.0))
+        elif dataset_key == "MODIS Burned Area":
+            value = float(np.clip(value, 0.0, 1.0))
 
         records.append({"date": current, "value": value})
         current += step
@@ -766,7 +913,89 @@ def _get_fallback_interpretation(stats, dataset_key, region_name):
     direction = stats["trend_direction"]
     slope     = stats["slope_per_year"]
 
-    if dataset_key in ("MODIS NDVI", "Landsat NDVI"):
+    if dataset_key == "MODIS EVI":
+        return (
+            f"**EVI Time Series — {region_name}**\n\n"
+            f"**What the data shows:**\n"
+            f"The Enhanced Vegetation Index peaks in {stats['peak_month']} "
+            f"(EVI {stats['peak_value']:.3f}) and reaches its seasonal low in "
+            f"{stats['trough_month']} (EVI {stats['trough_value']:.3f}). "
+            f"Mean EVI is {stats['mean']:.3f}. "
+            f"Long-term trend is {direction} at {slope:+.4f} EVI units per year. "
+            f"EVI values are typically 10-20% lower than NDVI for the same vegetation "
+            f"because the index corrects for soil brightness and atmospheric haze.\n\n"
+            f"**Why EVI differs from NDVI:**\n"
+            f"NDVI saturates above an LAI (Leaf Area Index) of roughly 3 — dense tropical "
+            f"forest and mature cropland all appear similarly high. EVI adds a soil adjustment "
+            f"factor and a blue-band aerosol term that prevent this saturation. "
+            f"In practice, EVI shows more variation inside dense canopy and is more stable "
+            f"in high-aerosol environments like biomass burning regions.\n\n"
+            f"**Practical application:**\n"
+            f"EVI is the preferred index for carbon flux modelling in tropical forests. "
+            f"It correlates more reliably with gross primary productivity (GPP) than NDVI "
+            f"in high-biomass ecosystems.\n\n"
+            f"**Limitation:**\n"
+            f"EVI requires a blue band. In high-aerosol conditions, the blue band is noisy, "
+            f"which can introduce artefacts. The 250 m resolution limit is the same as MODIS NDVI."
+        )
+
+    elif dataset_key == "Landsat NDWI":
+        return (
+            f"**NDWI Time Series — {region_name}**\n\n"
+            f"**What the data shows:**\n"
+            f"The Normalized Difference Water Index peaks in {stats['peak_month']} "
+            f"(NDWI {stats['peak_value']:.3f}) and drops to its seasonal low in "
+            f"{stats['trough_month']} (NDWI {stats['trough_value']:.3f}). "
+            f"Mean NDWI is {stats['mean']:.3f}. "
+            f"Long-term trend is {direction} at {slope:+.4f} NDWI units per year. "
+            f"Positive values indicate open water or saturated soil. "
+            f"Values below -0.2 indicate dry land or bare soil.\n\n"
+            f"**Why this pattern exists:**\n"
+            f"NDWI measures the contrast between green-light reflectance (high over water) "
+            f"and near-infrared reflectance (low over water, high over vegetation). "
+            f"The seasonal peak corresponds to the wet season when surface water extent "
+            f"is greatest. The trough marks the driest period when standing water recedes "
+            f"and soil moisture drops.\n\n"
+            f"**Practical application:**\n"
+            f"NDWI time series track reservoir and lake level changes without a gauge station. "
+            f"A sustained negative trend signals progressive water body shrinkage, "
+            f"as seen in Lake Chad and the Aral Sea. Flood events appear as sudden spikes.\n\n"
+            f"**Limitation:**\n"
+            f"Dense vegetation suppresses NDWI even when underlying soil is wet. "
+            f"The index detects surface water, not groundwater or subsurface moisture. "
+            f"Cloud cover creates the same data gaps as for Landsat NDVI."
+        )
+
+    elif dataset_key == "MODIS Burned Area":
+        return (
+            f"**Burned Area Time Series — {region_name}**\n\n"
+            f"**What the data shows:**\n"
+            f"The fraction of the study area that burned each month peaks in "
+            f"{stats['peak_month']} at {stats['peak_value']:.3f} "
+            f"({stats['peak_value']*100:.1f}% of the area). "
+            f"Most months register near zero, which is normal — fire is a punctuated "
+            f"event, not a continuous one. "
+            f"Long-term trend is {direction} at {slope:+.5f} fraction per year. "
+            f"The mean of {stats['mean']:.4f} represents the average monthly burned fraction "
+            f"across the full analysis period.\n\n"
+            f"**Why this pattern exists:**\n"
+            f"Fire occurrence follows the dry season. Fuel (dry vegetation) accumulates "
+            f"during the growing season and ignites when moisture drops. "
+            f"In savanna regions, fire is a natural part of the ecosystem cycle. "
+            f"In tropical forest, fire is almost always human-caused — agricultural clearing "
+            f"or escaped pasture fires. Interannual spikes often correspond to El Niño "
+            f"drought years when conditions become extreme.\n\n"
+            f"**Practical application:**\n"
+            f"Burned area time series are a primary input to carbon accounting. "
+            f"Each burned pixel releases stored carbon. An increasing trend in forest "
+            f"regions signals accelerating land clearance.\n\n"
+            f"**Limitation:**\n"
+            f"Small fires below the 500 m pixel size are not detected. "
+            f"Smouldering fires with minimal surface change are also missed. "
+            f"The product works best at regional scale, not for individual burn events."
+        )
+
+    elif dataset_key in ("MODIS NDVI", "Landsat NDVI"):
 
         if "Sahel" in region_name:
             return (
