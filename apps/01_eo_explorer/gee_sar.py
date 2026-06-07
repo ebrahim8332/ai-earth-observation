@@ -233,10 +233,23 @@ def build_sar_map(image1, image2, bbox, date1_str, date2_str):
     ]
 
     # --- Add each layer as a Folium TileLayer ---
+    # getMapId() return structure differs across earthengine-api versions.
+    # New API (1.4+): map_id["tile_fetcher"].url_format
+    # Old API: construct from map_id["mapid"] + map_id["token"]
+    # We try new first, fall back to old so the map works on any version.
     for gee_image, vis_params, name, show in layers:
         try:
-            map_id   = gee_image.getMapId(vis_params)
-            tile_url = map_id["tile_fetcher"].url_format
+            map_id = gee_image.getMapId(vis_params)
+            tf = map_id.get("tile_fetcher")
+            if tf is not None and hasattr(tf, "url_format"):
+                tile_url = tf.url_format
+            else:
+                mid   = map_id["mapid"]
+                token = map_id["token"]
+                tile_url = (
+                    f"https://earthengine.googleapis.com/map/{mid}"
+                    f"/{{z}}/{{x}}/{{y}}?token={token}"
+                )
             folium.TileLayer(
                 tiles=tile_url,
                 attr="Google Earth Engine / Copernicus Sentinel-1",
