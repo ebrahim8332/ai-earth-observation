@@ -34,7 +34,7 @@ PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 
 # Rendering API endpoints.
 # /preview renders the full item tile (100 km × 100 km for Sentinel-2).
-# /crop/{minx},{miny},{maxx},{maxy}/preview.png clips to a geographic bbox.
+# /crop/{minx},{miny},{maxx},{maxy}.png clips to a geographic bbox.
 PC_RENDER_URL      = "https://planetarycomputer.microsoft.com/api/data/v1/item/preview"
 PC_RENDER_BASE_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item"
 
@@ -163,12 +163,12 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
         params.append(("color_formula", gamma))
 
     # Choose the correct endpoint.
-    # /preview returns the full item tile (100 km × 100 km for Sentinel-2).
-    # /crop/{bbox}/preview.png clips the render to the specified geographic extent.
-    # The bbox goes into the URL path, not a query param — the API ignores bbox query params.
+    # /preview renders the full item tile (100 km × 100 km for Sentinel-2).
+    # /crop/{minx},{miny},{maxx},{maxy}.png clips the render to the geographic bbox.
+    # The bbox goes into the URL path — the API ignores bbox as a query param.
     if bbox:
         crop = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
-        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}/preview.png"
+        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}.png"
     else:
         render_url = PC_RENDER_URL
 
@@ -222,7 +222,7 @@ def render_ndvi(item, satellite_key: str, width: int = 600,
 
     if bbox:
         crop = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
-        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}/preview.png"
+        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}.png"
     else:
         render_url = PC_RENDER_URL
 
@@ -268,7 +268,7 @@ def render_ndwi(item, satellite_key: str, width: int = 600,
 
     if bbox:
         crop = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
-        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}/preview.png"
+        render_url = f"{PC_RENDER_BASE_URL}/crop/{crop}.png"
     else:
         render_url = PC_RENDER_URL
 
