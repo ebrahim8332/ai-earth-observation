@@ -241,11 +241,12 @@ def compute_change_stats(img1, img2, diff_image, bbox, gee_available):
         )
 
         # Sum pixel area grouped by class — one round-trip for gain/loss/stable
+        # GEE rule: data band first, group band second. groupField=1 = band index 1 (class).
         area_by_class = (
-            class_img.rename("class")
-            .addBands(pixel_area.rename("area"))
+            pixel_area.rename("area")
+            .addBands(class_img.rename("class"))
             .reduceRegion(
-                reducer=ee.Reducer.sum().group(groupField=0, groupName="class"),
+                reducer=ee.Reducer.sum().group(groupField=1, groupName="class"),
                 geometry=geometry,
                 scale=STATS_SCALE,
                 maxPixels=1e8,
@@ -271,10 +272,10 @@ def compute_change_stats(img1, img2, diff_image, bbox, gee_available):
         )
 
         extreme_by_class = (
-            extreme_class_img.rename("class")
-            .addBands(pixel_area.rename("area"))
+            pixel_area.rename("area")
+            .addBands(extreme_class_img.rename("class"))
             .reduceRegion(
-                reducer=ee.Reducer.sum().group(groupField=0, groupName="class"),
+                reducer=ee.Reducer.sum().group(groupField=1, groupName="class"),
                 geometry=geometry,
                 scale=STATS_SCALE,
                 maxPixels=1e8,
