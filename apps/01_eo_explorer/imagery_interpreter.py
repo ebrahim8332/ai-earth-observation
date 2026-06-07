@@ -256,7 +256,7 @@ def _call_gemini_vision(
         ])],
         config = types.GenerateContentConfig(
             temperature       = 0.3,
-            max_output_tokens = 1024,
+            max_output_tokens = 2048,
         ),
     )
 
@@ -288,7 +288,7 @@ def _call_groq_vision(
             {"type": "image_url", "image_url": {"url": data_url}},
             {"type": "text",      "text": prompt},
         ]}],
-        max_tokens  = 1024,
+        max_tokens  = 2048,
         temperature = 0.3,
     )
 
