@@ -11,11 +11,13 @@ Chain order when both keys are present (best quality first):
   [1]  gemini-2.5-flash        — fast, high quality
   [2]  gemini-2.0-flash        — reliable, good quality
   [3]  gemini-2.0-flash-lite   — lighter, still strong
-  [4]  gemini-2.5-flash-lite   — lightest Gemini option
-  [5]  llama-3.3-70b-versatile — Groq Tier 1
-  [6]  llama-4-scout-17b       — Groq Tier 2, high limits
-  [7]  qwen3-32b               — Groq Tier 3
-  [8]  llama-3.1-8b-instant    — Groq last resort, very high RPD
+  [4]  gemini-2.5-flash-lite   — lightest named Gemini option
+  [5]  gemini-flash-latest     — alias, resolves to latest stable Flash
+  [6]  llama-3.3-70b-versatile — Groq Tier 1
+  [7]  llama-4-scout-17b       — Groq Tier 2, high limits
+  [8]  qwen3-32b               — Groq Tier 3
+  [9]  gpt-oss-120b            — Groq Tier 4, 200K TPD
+  [10] llama-3.1-8b-instant    — Groq last resort, very high RPD
 
 If only GROQ_API_KEY is set, Gemini tiers are skipped.
 If neither key is set, complete() returns (None, None) and the caller
@@ -50,12 +52,14 @@ _GEMINI_MODELS = [
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-2.5-flash-lite",
+    "gemini-flash-latest",          # alias — resolves to latest stable Flash
 ]
 
 _GROQ_MODELS = [
     "llama-3.3-70b-versatile",
     "meta-llama/llama-4-scout-17b-16e-instruct",
     "qwen/qwen3-32b",
+    "openai/gpt-oss-120b",          # 200K TPD, added from deck-studio chain
     "llama-3.1-8b-instant",
 ]
 
