@@ -5,15 +5,14 @@ Fetches a Sentinel-2 true-color chip from Planetary Computer for a user-specifie
 location and date, then passes the image bytes to a vision AI model for plain-language
 interpretation.
 
-Vision chain (8 models, multimodal only):
-  [0] gemini-2.5-pro          Google — best reasoning
-  [1] gemini-2.5-flash        Google — fast, confirmed working
-  [2] gemini-2.0-flash        Google
-  [3] gemini-2.0-flash-lite   Google
-  [4] gemini-2.5-flash-lite   Google
-  [5] gemini-flash-latest     Google — alias
-  [6] llama-4-scout-17b       Groq — confirmed working
-  [7] llama-4-maverick        Groq — Llama 4 multimodal
+Vision chain (7 models, multimodal only):
+  [0] gemini-2.5-flash        Google — best available on free tier (2.5-pro requires paid billing)
+  [1] gemini-2.0-flash        Google
+  [2] gemini-2.0-flash-lite   Google
+  [3] gemini-2.5-flash-lite   Google
+  [4] gemini-flash-latest     Google — alias
+  [5] llama-4-scout-17b       Groq — confirmed working
+  [6] llama-4-maverick        Groq — Llama 4 multimodal
 
 Text-only models (llama-3.3-70b, qwen3-32b, gpt-oss-120b, llama-3.1-8b) are not
 included — they cannot receive images.
@@ -38,7 +37,6 @@ import spectral_explorer
 
 # Only multimodal-capable models. Ordered best-to-fastest within each provider.
 _VISION_GEMINI_MODELS = [
-    "gemini-2.5-pro",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",

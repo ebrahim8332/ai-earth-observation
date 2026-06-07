@@ -7,17 +7,16 @@ mid-session (rate limit or server error), the chain continues from that
 point and re-locks to the next working model.
 
 Chain order when both keys are present (best quality first):
-  [0]  gemini-2.5-pro          — best reasoning, highest quality
-  [1]  gemini-2.5-flash        — fast, high quality
-  [2]  gemini-2.0-flash        — reliable, good quality
-  [3]  gemini-2.0-flash-lite   — lighter, still strong
-  [4]  gemini-2.5-flash-lite   — lightest named Gemini option
-  [5]  gemini-flash-latest     — alias, resolves to latest stable Flash
-  [6]  llama-3.3-70b-versatile — Groq Tier 1
-  [7]  llama-4-scout-17b       — Groq Tier 2, high limits
-  [8]  qwen3-32b               — Groq Tier 3
-  [9]  gpt-oss-120b            — Groq Tier 4, 200K TPD
-  [10] llama-3.1-8b-instant    — Groq last resort, very high RPD
+  [0]  gemini-2.5-flash        — best available on free tier (2.5-pro requires paid billing)
+  [1]  gemini-2.0-flash        — reliable, good quality
+  [2]  gemini-2.0-flash-lite   — lighter, still strong
+  [3]  gemini-2.5-flash-lite   — lightest named Gemini option
+  [4]  gemini-flash-latest     — alias, resolves to latest stable Flash
+  [5]  llama-3.3-70b-versatile — Groq Tier 1
+  [6]  llama-4-scout-17b       — Groq Tier 2, high limits
+  [7]  qwen3-32b               — Groq Tier 3
+  [8]  gpt-oss-120b            — Groq Tier 4, 200K TPD
+  [9]  llama-3.1-8b-instant    — Groq last resort, very high RPD
 
 If only GROQ_API_KEY is set, Gemini tiers are skipped.
 If neither key is set, complete() returns (None, None) and the caller
@@ -47,7 +46,6 @@ _LOCK_KEY = "ai_chain_locked_index"
 # ---------------------------------------------------------------------------
 
 _GEMINI_MODELS = [
-    "gemini-2.5-pro",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
