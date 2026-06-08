@@ -173,6 +173,11 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
             # which pixel rows and columns correspond to the desired bbox.
             # This avoids relying on any undocumented API crop endpoint.
             arr = _clip_to_bbox(arr, item.bbox, bbox)
+            # Remove nodata (black) borders within the clipped region.
+            # The tile footprint is a diagonal parallelogram — the selected
+            # bbox may extend outside it, leaving black nodata strips.
+            # skip_ratio_guard=True because _pad_to_ratio handles shape next.
+            arr = _crop_to_valid(arr, skip_ratio_guard=True)
             # Pad extreme aspect ratios so large radius selections don't
             # produce unreasonably tall or wide images in the display.
             arr = _pad_to_ratio(arr)
@@ -543,7 +548,8 @@ def _clip_to_bbox(arr: np.ndarray, item_bbox: list, clip_bbox: list) -> np.ndarr
     return arr[y0:y1, x0:x1]
 
 
-def _crop_to_valid(arr: np.ndarray, threshold: int = 5) -> np.ndarray:
+def _crop_to_valid(arr: np.ndarray, threshold: int = 5,
+                    skip_ratio_guard: bool = False) -> np.ndarray:
     """
     Crop a numpy image array to the bounding box of non-black pixels.
     Removes the large black nodata borders that satellite tiles contain.
@@ -552,6 +558,10 @@ def _crop_to_valid(arr: np.ndarray, threshold: int = 5) -> np.ndarray:
     3:1 in either direction), the original uncropped array is returned instead.
     This prevents thin-strip thumbnails when a tile only marginally overlaps
     the search area and valid pixels are confined to one edge.
+
+    skip_ratio_guard: set True when cropping a bbox-clipped result. In that
+    case we always crop (the caller applies _pad_to_ratio afterward to handle
+    any resulting extreme aspect ratio).
     """
     valid = arr.max(axis=2) > threshold
     if not valid.any():
@@ -560,12 +570,15 @@ def _crop_to_valid(arr: np.ndarray, threshold: int = 5) -> np.ndarray:
     cols = np.where(valid.any(axis=0))[0]
     cropped = arr[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
 
-    # Reject degenerate crops — return original if aspect ratio exceeds 3:1
     h, w = cropped.shape[:2]
     if h == 0 or w == 0:
         return arr
-    ratio = max(w / h, h / w)
-    if ratio > 3.0:
-        return arr
+
+    # Reject degenerate crops — return original if aspect ratio exceeds 3:1.
+    # Skipped when caller handles aspect ratio itself (e.g. after _clip_to_bbox).
+    if not skip_ratio_guard:
+        ratio = max(w / h, h / w)
+        if ratio > 3.0:
+            return arr
 
     return cropped
