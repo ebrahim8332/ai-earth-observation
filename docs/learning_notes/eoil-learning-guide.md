@@ -307,3 +307,99 @@ chain shared across all modules. Notebook `04_change_detection.ipynb` committed.
 more pixels than at 1000m scale, with less than 2% difference in the area totals. For
 summary statistics (km² of gain/loss), 1000m is accurate enough and runs roughly twice
 as fast. Reserve 500m or finer for precision applications where pixel-level accuracy matters.
+
+---
+
+## Day 10: AI Imagery Interpreter Portal Module
+
+**What was built:** Added AI Imagery Interpreter as the sixth sidebar module. EO Explorer v1.6.
+User enters a location and date range. App fetches the best Sentinel-2 true-color scene
+from Planetary Computer and sends the image as JPEG bytes to a 7-model vision AI chain.
+Vision AI returns a structured interpretation covering land cover, notable features,
+seasonal state, and decision applications.
+
+**Key concepts:**
+
+- **Vision AI (multimodal models)** can receive an image alongside a text prompt.
+  The model sees the image and the question at the same time. Gemini and Llama-4 both
+  support this. Text-only models (most Groq models) cannot receive images.
+- **Base64 encoding** converts binary image data (JPEG bytes) into a text-safe string
+  so it can be included in a JSON API request. The model decodes it back to an image
+  on the server side.
+- **Transfer learning** is the concept behind how vision models work. A foundation model
+  is pretrained on hundreds of millions of images. Fine-tuning adapts it to a specific
+  task (satellite interpretation, defect detection) using a much smaller labeled dataset.
+  You do not train from scratch — you start with a model that already understands images.
+- **Area size guard** prevents the user from requesting an area so large the image is
+  meaningless. Above 25,000 km² the pixels are too small to see meaningful detail.
+  Above 100,000 km² the app blocks the request entirely.
+
+**What to remember:** Gemini performs significantly better on satellite image interpretation
+than Groq Llama-4. Gemini has been trained on more geospatial data. When demonstrating
+this module, make sure a Gemini API key is configured.
+
+---
+
+## Day 11: Shared Map Picker
+
+**What was built:** Created `map_picker.py` — a shared component wired into all five
+analytical modules. User types a location, then opens the map picker expander and clicks
+the map to set the exact analysis area. A blue rectangle shows the bbox. A size slider
+controls the region from 25 to 500 km. Portal bumped to v1.7.
+
+**Key concepts:**
+
+- **Geocoding imprecision** is a real problem for satellite analysis. "Port of Rotterdam"
+  might geocode to an inland area. "Permian Basin, Texas" might return a single point.
+  The map picker solves this by letting the user visually confirm and correct the area
+  before analysis runs.
+- **Session state keys** — each module uses a unique prefix (se_, ts_, sar_, cd_, ii_)
+  for its map picker state. Without unique keys, clicking in one module would affect
+  the analysis area of every other module.
+- **Aspect ratio guard** prevents thin-strip images when the tile only marginally overlaps
+  the search area. A 2:1 maximum aspect ratio is enforced on rendered images.
+
+**What to remember:** The map picker is a Folium map inside a Streamlit expander. Folium
+maps use streamlit-folium's `st_folium()` to capture click events and return them as
+Python dict objects. The click lat/lon is stored in `st.session_state` immediately.
+
+---
+
+## Day 12: Emissions Explorer
+
+**What was built:** Added Emissions Explorer as the seventh sidebar module. Portal v1.8.
+Fetches TROPOMI Sentinel-5P data from Google Earth Engine for four atmospheric gases:
+CH4, NO2, CO, SO2. Uses a 7-day composite to ensure solid pixel coverage. Displays a
+Folium map with a scaled colorbar and an AI interpretation using the shared ai_chain.
+
+**Key concepts:**
+
+- **TROPOMI (TROPOspheric Monitoring Instrument)** is aboard ESA's Sentinel-5P satellite.
+  It measures atmospheric gas concentrations globally at roughly 5.5 km × 7 km pixel size.
+  Daily revisit. Data is free and available via Google Earth Engine.
+- **7-day composite** stacks all orbital passes in a 7-day window and takes the mean.
+  Sentinel-5P makes about 14 passes per day — 98 passes over 7 days. This fills most
+  masked (cloudy or low-quality) pixels and produces a clean regional picture.
+  Single-day composites leave large gaps where quality masking removed pixels.
+- **TROPOMI projection issue** — `.mean()` on a TROPOMI ImageCollection creates an image
+  with an identity transform (1 degree per pixel). `reduceRegion` at a finer scale
+  returns null or a single pixel. The fix is point sampling via `sampleRegions` on a
+  3×3 grid of points — this bypasses the projection entirely and returns valid values.
+- **Display scaling** — TROPOMI gas concentrations are stored in SI units (mol/m²) which
+  produce 5-decimal-place numbers on a colorbar. We scale them for display only:
+  NO2 × 10,000 → ×10⁻⁴ mol/m², CO × 1,000 → mmol/m², SO2 × 1,000 → mmol/m².
+  GEE vis_params use the original values — scaling is display-only.
+- **Overlay opacity** — satellite gas data is rendered as a semi-transparent layer over
+  a CartoDB Positron base map. Opacity 0.55 gives enough transparency for city labels
+  and geography to show through while the gas signal remains readable.
+
+**Two-layer AI architecture (introduced Day 12):**
+From Day 12 onward, every module is designed with two distinct AI layers:
+- **Layer 1 — ML / Algorithm:** finds the pattern. K-means, Isolation Forest, PCA, CNN.
+- **Layer 2 — Generative AI:** explains what the pattern means. Groq/Gemini interpret,
+  contextualise, and recommend action.
+Neither layer alone is sufficient. ML finds. Generative AI explains.
+
+**What to remember:** The GEE tile rendering and `reduceRegion` use different evaluation
+paths. A TROPOMI composite that renders correctly on a map may still return null from
+`reduceRegion`. Always use point sampling (`sampleRegions`) for TROPOMI statistics.
