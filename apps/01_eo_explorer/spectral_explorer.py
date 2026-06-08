@@ -198,7 +198,9 @@ def _render_index(item, satellite_key: str, assets: list, expression: str,
     """
     sat = satellite_catalog.SATELLITES[satellite_key]
 
-    # Build params — assets must be listed before expression
+    # Build params — assets listed first, then asset_as_band=True so the
+    # expression parser can reference them by name (e.g. "B08") rather than
+    # by positional index (b1, b2). Without this flag the API returns 400.
     params = [
         ("collection",    sat["collection"]),
         ("item",          item.id),
@@ -206,6 +208,7 @@ def _render_index(item, satellite_key: str, assets: list, expression: str,
     for asset in assets:
         params.append(("assets", asset))
     params += [
+        ("asset_as_band", "True"),
         ("expression",    expression),
         ("colormap_name", colormap),
         ("rescale",       "-1,1"),

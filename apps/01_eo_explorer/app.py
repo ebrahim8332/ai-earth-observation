@@ -1254,63 +1254,70 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                 help="Snow and ice. Blue = snow/ice present, red = bare ground."
             )
 
-        # Helper: get the best available item for rendering
-        def _get_index_item():
-            item = st.session_state.se_best_item
-            if item is None and st.session_state.se_items:
-                item = st.session_state.se_items[0]
-            return item
+        # Resolve the best item directly from session state.
+        # se_best_item is set by the search. se_items is the full list fallback.
+        # Do this once here so all three button handlers share the same reference.
+        _idx_item = st.session_state.get("se_best_item")
+        if _idx_item is None:
+            _idx_items = st.session_state.get("se_items", [])
+            _idx_item  = _idx_items[0] if _idx_items else None
 
         # --- NDVI render ---
         if ndvi_btn:
-            item = _get_index_item()
-            if item is None:
-                st.warning("Search for scenes first.")
+            if _idx_item is None:
+                st.warning(
+                    "No scene loaded. Use **Search for scenes** above first, "
+                    "then click Render NDVI."
+                )
             else:
                 with st.spinner("Rendering NDVI..."):
-                    arr = spectral_explorer.render_ndvi(item, sat_key, width=700, bbox=bbox_se)
+                    arr = spectral_explorer.render_ndvi(_idx_item, sat_key, width=700, bbox=bbox_se)
                 if arr is not None and arr.max() > 0:
                     st.session_state.se_ndvi_arr  = arr
                     st.session_state.se_ndvi_info = {
-                        "scene_date":     item.datetime.strftime("%B %d, %Y"),
+                        "scene_date":     _idx_item.datetime.strftime("%B %d, %Y"),
                         "sat_key":        sat_key,
-                        "location_label": location_label,
+                        "location_label": location_label or "selected area",
                     }
                 else:
                     st.warning("NDVI render failed. Try a different scene or location.")
 
         # --- NDWI render ---
         if ndwi_btn:
-            item = _get_index_item()
-            if item is None:
-                st.warning("Search for scenes first.")
+            if _idx_item is None:
+                st.warning(
+                    "No scene loaded. Use **Search for scenes** above first, "
+                    "then click Render NDWI."
+                )
             else:
                 with st.spinner("Rendering NDWI..."):
-                    arr = spectral_explorer.render_ndwi(item, sat_key, width=700, bbox=bbox_se)
+                    arr = spectral_explorer.render_ndwi(_idx_item, sat_key, width=700, bbox=bbox_se)
                 if arr is not None and arr.max() > 0:
                     st.session_state.se_ndwi_arr  = arr
                     st.session_state.se_ndwi_info = {
-                        "scene_date":     item.datetime.strftime("%B %d, %Y"),
+                        "scene_date":     _idx_item.datetime.strftime("%B %d, %Y"),
                         "sat_key":        sat_key,
-                        "location_label": location_label,
+                        "location_label": location_label or "selected area",
                     }
                 else:
                     st.warning("NDWI render failed. Try a different scene or location.")
 
         # --- NDSI render ---
         if ndsi_btn:
-            item = _get_index_item()
-            if item is None:
-                st.warning("Search for scenes first.")
+            if _idx_item is None:
+                st.warning(
+                    "No scene loaded. Use **Search for scenes** above first, "
+                    "then click Render NDSI."
+                )
             else:
                 with st.spinner("Rendering NDSI..."):
-                    arr = spectral_explorer.render_ndsi(item, sat_key, width=700, bbox=bbox_se)
+                    arr = spectral_explorer.render_ndsi(_idx_item, sat_key, width=700, bbox=bbox_se)
                 if arr is not None and arr.max() > 0:
                     st.session_state.se_ndsi_arr  = arr
                     st.session_state.se_ndsi_info = {
-                        "scene_date":     item.datetime.strftime("%B %d, %Y"),
+                        "scene_date":     _idx_item.datetime.strftime("%B %d, %Y"),
                         "sat_key":        sat_key,
-                        "location_label": location_label,
+                        "location_label": location_label or "selected area",
                     }
                 else:
                     st.warning("NDSI render failed. Try a different scene or location.")
