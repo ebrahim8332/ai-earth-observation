@@ -281,7 +281,7 @@ def build_emissions_map(image, gas_key, bbox, actual_date):
             name    = f"{gas_key} — {actual_date}",
             overlay = True,
             control = True,
-            opacity = 0.65,
+            opacity = 0.55,
         ).add_to(m)
 
         # Colorbar legend.
