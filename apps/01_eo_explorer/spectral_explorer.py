@@ -306,14 +306,6 @@ def render_ndsi(item, satellite_key: str, width: int = 600,
         return None
 
     return _render_index(item, satellite_key, assets, expression, "rdbu", width, bbox)
-        arr = np.array(img)
-        if bbox:
-            arr = _clip_to_bbox(arr, item.bbox, bbox)
-        else:
-            arr = _crop_to_valid(arr)
-        return arr
-    except Exception:
-        return None
 
 
 # ---------------------------------------------------------------------------
