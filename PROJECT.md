@@ -7,30 +7,40 @@
 
 ## Current Status
 
-**Program day:** 9 complete
+**Program day:** 11 complete
 **Phase:** Week 2 in progress
-**Last completed:** Change Detection portal module — NDVI difference, three-layer Folium change map, 12 summary statistics, 11-model AI fallback chain, portal v1.5 deployed and confirmed working on Zanzibar and Sierra Nevada
-**Next session:** Day 10 — AI Imagery Interpreter portal module (Sentinel-2 chip to Gemini vision)
+**Last completed:** Shared map picker (map_picker.py) added to all five portal modules. v1.7 deployed. User can type a place name, then click the map to set an exact analysis bbox with a size slider (25-500 km). Eliminates geocoding ambiguity for specific features. Text geocoding stays as primary.
+**Next session:** Day 12 — TBD
 
 ---
 
-## Today's Task: Day 10 — AI Imagery Interpreter
+## Completed: Day 11 — Shared Map Picker
 
-**Goal:** Add AI Imagery Interpreter as the sixth sidebar module in the portal.
-**Sidebar label:** 🔍 AI Imagery Interpreter
+- [x] map_picker.py created — shared component, ~160 lines
+- [x] render_map_picker(centre_bbox, picker_key, default_size_km) — single public function
+- [x] CartoDB Positron basemap (no API key needed)
+- [x] Auto zoom level from geocoded bbox width
+- [x] Size slider: 25 to 500 km, step 25
+- [x] Blue rectangle drawn on map showing exact analysis area
+- [x] CircleMarker at click centre point
+- [x] clear_click(picker_key) helper — called when user types a new location
+- [x] Wired into all five modules as expander: "📍 Refine location — click map to set exact area"
+- [x] Default sizes: Spectral 50 km, Time Series 100 km, SAR 50 km, Change Detection 100 km, Imagery 50 km
+- [x] Portal bumped to v1.7, deployed and confirmed clean startup
+- [x] Backlog item "Map picker for location (Option D)" cleared
+- [x] Render clip fix: _clip_to_bbox() helper added to spectral_explorer.py — local pixel crop using item.bbox so rendered images respect the map picker selection. PC Render API /preview always used; clip applied locally after fetch.
 
-**What it does:**
-User picks a location. App fetches a Sentinel-2 true-color chip via Planetary Computer.
-Chip is passed to Gemini vision with a structured prompt. AI returns a plain-language
-interpretation of what the image shows: land cover types, notable features, anomalies.
+## Completed: Day 10 — AI Imagery Interpreter
 
-**Definition of done:**
-- [ ] Module file created: gee_imagery.py or similar
-- [ ] Wired into app.py as sixth sidebar entry
-- [ ] Gemini vision call works with structured prompt
-- [ ] Substantive fallback if no GEMINI_API_KEY
-- [ ] Deployed to Streamlit Cloud without errors
-- [ ] Committed with message: [day-10] add AI Imagery Interpreter portal module
+- [x] imagery_interpreter.py created — 7-model vision chain (5 Gemini + 2 Groq Llama-4)
+- [x] fetch_chip(bbox, date_start, date_end) — searches user-set date range, picks best scene
+- [x] array_to_jpeg_bytes() — numpy to JPEG at quality 85
+- [x] interpret_image() — returns (text, model_name) tuple
+- [x] max_output_tokens=4096 for Gemini (thinking tokens reduce output budget)
+- [x] Date range inputs (start + end) — no hidden search window
+- [x] Area size guard: warn >25,000 km², block >100,000 km²
+- [x] Wired into app.py as sixth sidebar entry (v1.6)
+- [x] Confirmed working on Zanzibar, Tanzania
 
 ## Completed: Day 9 — Change Detection Module
 
@@ -66,7 +76,7 @@ No standalone apps. Every deliverable is a new sidebar module in the portal.
 | Time Series Explorer | 6 | Live |
 | SAR Explorer | 7 | Live |
 | Change Detection | 9 | Live |
-| AI Imagery Interpreter | 10 | Planned |
+| AI Imagery Interpreter | 10 | Live |
 | EO Conversational Assistant | 13 | Planned |
 | Environmental Intelligence | 15 | Planned |
 | Atmospheric Intelligence | 17 | Planned |
@@ -123,8 +133,7 @@ Track which dependency groups are active.
 
 ## Backlog — SAR Explorer improvements
 
-- **Map picker for location** (Option D): Replace text geocoding with a small Folium map the user clicks to set the centre point. Build the bbox around the click. Eliminates all geocoding ambiguity for port and industrial feature queries. Text geocoding stays as a fallback for users who want to type a city name first, then fine-tune on the map.
-- Known bad geocodes: "Port of Rotterdam" resolves to an inland agricultural area. "Maasvlakte Rotterdam" or coordinates work correctly.
+- Known bad geocodes: "Port of Rotterdam" resolves to an inland agricultural area. "Maasvlakte Rotterdam" or coordinates work correctly. The map picker (Day 11) now solves this — type the city, then click the exact port area on the map.
 
 ---
 
@@ -162,8 +171,8 @@ Update the checkbox and add a one-line note after each day is complete.
 ### Week 2: Core Analysis and AI Integration
 
 - [x] Day 9: Change Detection portal module — NDVI difference map, three-layer Folium change overlay, AI interpretation with fallback; notebook committed
-- [ ] Day 10: AI Imagery Interpreter portal module — Sentinel-2 chip to Gemini vision, structured interpretation
-- [ ] Day 11: SAM segmentation notebook
+- [x] Day 10: AI Imagery Interpreter portal module — Sentinel-2 chip to Gemini vision, structured interpretation
+- [x] Day 11: Shared map picker (map_picker.py) — all five modules; render clip fix (_clip_to_bbox) in spectral_explorer.py
 - [ ] Day 12: Prithvi foundation model notebook (Colab)
 - [ ] Day 13: EO Conversational Assistant portal module — Groq chat with EO context
 - [ ] Day 14: Week 2 review and AI-applied-to-EO document
