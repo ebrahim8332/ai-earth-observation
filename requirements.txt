@@ -12,3 +12,4 @@ planetary-computer
 groq
 google-genai
 earthengine-api==1.7.29
+scikit-learn

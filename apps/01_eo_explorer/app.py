@@ -1,5 +1,5 @@
 """
-app.py — EOIL Portal v1.7
+app.py — EOIL Portal v1.9
 Streamlit layout and component wiring only. No business logic here.
 All logic is imported from other modules.
 
@@ -12,6 +12,7 @@ v1.5  Day 9:  Change Detection module added (fifth sidebar entry)
 v1.6  Day 10: AI Imagery Interpreter added (sixth sidebar entry)
 v1.7  Day 11: Shared map picker added to all five modules; aspect ratio fix for contact sheet and large radius renders
 v1.8  Day 12: Emissions Explorer added (TROPOMI CH4/NO2/CO/SO2 via GEE)
+v1.9  Arc 1:  Land Cover Intelligence added (K-means + Random Forest on Sentinel-2 via Planetary Computer)
 """
 
 import streamlit as st
@@ -33,6 +34,7 @@ import gee_change
 import imagery_interpreter
 import map_picker
 import methane_explorer
+import land_cover
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -68,7 +70,7 @@ with st.sidebar:
     st.markdown("### Module")
     selected_module = st.radio(
         "Navigate",
-        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer", "🌫️ Emissions Explorer"],
+        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer", "🌫️ Emissions Explorer", "🌿 Land Cover Intelligence"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -2557,6 +2559,36 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
     st.stop()
 
 # ---------------------------------------------------------------------------
+# MODULE 7 — Land Cover Intelligence (Arc 1)
+# K-means clustering + Random Forest on Sentinel-2 via Planetary Computer.
+# No GEE required — uses PC STAC API directly.
+# ---------------------------------------------------------------------------
+
+if selected_module == "🌿 Land Cover Intelligence":
+
+    # Initialise session state keys used by land_cover.py
+    for _k, _v in [
+        ("lc_scene",          None),
+        ("lc_kmeans",         None),
+        ("lc_rf",             None),
+        ("lc_ai",             None),
+        ("lc_ai_model",       None),
+        ("lc_region",         ""),
+        ("lc_pending",        None),
+        ("lc_geocoded_place", ""),
+        ("lc_geocoded_bbox",  None),
+    ]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
+
+    land_cover.render(
+        location_name=st.session_state.get("lc_geocoded_place", ""),
+        bbox=st.session_state.get("lc_geocoded_bbox", None),
+    )
+
+    st.stop()
+
+# ---------------------------------------------------------------------------
 # MODULE 0 — Welcome panel (default when Welcome is selected)
 # ---------------------------------------------------------------------------
 
@@ -2664,7 +2696,7 @@ with col_b:
 
 st.divider()
 st.caption(
-    "EOIL Portal v1.8 — Earth Observation Innovation Lab. Modules: Spectral, Time Series, SAR, Change Detection, AI Imagery Interpreter, Emissions Explorer. "
+    "EOIL Portal v1.9 — Earth Observation Innovation Lab. Modules: Spectral, Time Series, SAR, Change Detection, AI Imagery Interpreter, Emissions Explorer, Land Cover Intelligence. "
     "Built with Claude Code. "
     "Login and access controls will be added in a future version."
 )
