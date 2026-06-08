@@ -2486,8 +2486,23 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
         st.subheader("📊 Regional Concentration")
         c1, c2, c3 = st.columns(3)
 
-        val_display = f"{mean_val:.4f}" if mean_val is not None else "No valid pixels"
-        c1.metric(f"Regional average ({cfg['unit']})", val_display)
+        disp_scale = cfg.get("display_scale", 1)
+        disp_unit  = cfg.get("display_unit",  cfg["unit"])
+        if mean_val is not None:
+            scaled_val  = mean_val * disp_scale
+            # Pick decimal places based on scaled magnitude
+            magnitude = abs(scaled_val)
+            if magnitude == 0:
+                val_display = "0.000"
+            elif magnitude >= 100:
+                val_display = f"{scaled_val:.1f}"
+            elif magnitude >= 1:
+                val_display = f"{scaled_val:.3f}"
+            else:
+                val_display = f"{scaled_val:.4f}"
+        else:
+            val_display = "No valid pixels"
+        c1.metric(f"Regional average ({disp_unit})", val_display)
         c2.metric("Period (7-day composite)", actual_date)
         c3.metric("Orbital passes in window", pass_count)
 
