@@ -11,6 +11,7 @@ v1.4  Day 7:  SAR Explorer added; EO Explorer replaced with Welcome panel
 v1.5  Day 9:  Change Detection module added (fifth sidebar entry)
 v1.6  Day 10: AI Imagery Interpreter added (sixth sidebar entry)
 v1.7  Day 11: Shared map picker added to all five modules
+v1.8  Day 12: Spectral Indices section added to Spectral Explorer (NDVI, NDWI, NDSI full-size renders)
 """
 
 import streamlit as st
@@ -771,6 +772,12 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         ("se_rendered_info",   None),
         ("se_contact_results", None),
         ("se_contact_info",    None),
+        ("se_ndvi_arr",        None),
+        ("se_ndvi_info",       None),
+        ("se_ndwi_arr",        None),
+        ("se_ndwi_info",       None),
+        ("se_ndsi_arr",        None),
+        ("se_ndsi_info",       None),
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
@@ -850,6 +857,9 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         st.session_state.se_best_item        = None
         st.session_state.se_rendered_arr     = None
         st.session_state.se_contact_results  = None
+        st.session_state.se_ndvi_arr         = None
+        st.session_state.se_ndwi_arr         = None
+        st.session_state.se_ndsi_arr         = None
 
     # -----------------------------------------------------------------------
     # Row 2: Date range + Cloud cover + Search button
@@ -1211,6 +1221,190 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     st.caption(result["note"])
                     if result.get("channels"):
                         st.caption(f"📡 {result['channels']}")
+
+    # -----------------------------------------------------------------------
+    # SPECTRAL INDICES — full-size renders with colour scale guide
+    # -----------------------------------------------------------------------
+    st.divider()
+    st.markdown("### 📊 Spectral Indices")
+    st.caption(
+        "Indices are band math — not colour images. Each pixel is a calculated number "
+        "between -1 and +1, mapped to a colour scale. The result shows a quantitative "
+        "signal: how much vegetation, water, or snow is present at each location."
+    )
+
+    if sat_info.get("sar"):
+        st.info("Spectral indices require optical bands. Not available for SAR satellites.")
+    else:
+        # Three render buttons in a row
+        col_ndvi_btn, col_ndwi_btn, col_ndsi_btn = st.columns(3)
+        with col_ndvi_btn:
+            ndvi_btn = st.button(
+                "🌿 Render NDVI", key="se_ndvi_btn", use_container_width=True,
+                help="Vegetation health. Green = healthy, red = bare or stressed."
+            )
+        with col_ndwi_btn:
+            ndwi_btn = st.button(
+                "💧 Render NDWI", key="se_ndwi_btn", use_container_width=True,
+                help="Water bodies. Bright blue = open water."
+            )
+        with col_ndsi_btn:
+            ndsi_btn = st.button(
+                "❄️ Render NDSI", key="se_ndsi_btn", use_container_width=True,
+                help="Snow and ice. Blue = snow/ice present, red = bare ground."
+            )
+
+        # Helper: get the best available item for rendering
+        def _get_index_item():
+            item = st.session_state.se_best_item
+            if item is None and st.session_state.se_items:
+                item = st.session_state.se_items[0]
+            return item
+
+        # --- NDVI render ---
+        if ndvi_btn:
+            item = _get_index_item()
+            if item is None:
+                st.warning("Search for scenes first.")
+            else:
+                with st.spinner("Rendering NDVI..."):
+                    arr = spectral_explorer.render_ndvi(item, sat_key, width=700, bbox=bbox_se)
+                if arr is not None and arr.max() > 0:
+                    st.session_state.se_ndvi_arr  = arr
+                    st.session_state.se_ndvi_info = {
+                        "scene_date":     item.datetime.strftime("%B %d, %Y"),
+                        "sat_key":        sat_key,
+                        "location_label": location_label,
+                    }
+                else:
+                    st.warning("NDVI render failed. Try a different scene or location.")
+
+        # --- NDWI render ---
+        if ndwi_btn:
+            item = _get_index_item()
+            if item is None:
+                st.warning("Search for scenes first.")
+            else:
+                with st.spinner("Rendering NDWI..."):
+                    arr = spectral_explorer.render_ndwi(item, sat_key, width=700, bbox=bbox_se)
+                if arr is not None and arr.max() > 0:
+                    st.session_state.se_ndwi_arr  = arr
+                    st.session_state.se_ndwi_info = {
+                        "scene_date":     item.datetime.strftime("%B %d, %Y"),
+                        "sat_key":        sat_key,
+                        "location_label": location_label,
+                    }
+                else:
+                    st.warning("NDWI render failed. Try a different scene or location.")
+
+        # --- NDSI render ---
+        if ndsi_btn:
+            item = _get_index_item()
+            if item is None:
+                st.warning("Search for scenes first.")
+            else:
+                with st.spinner("Rendering NDSI..."):
+                    arr = spectral_explorer.render_ndsi(item, sat_key, width=700, bbox=bbox_se)
+                if arr is not None and arr.max() > 0:
+                    st.session_state.se_ndsi_arr  = arr
+                    st.session_state.se_ndsi_info = {
+                        "scene_date":     item.datetime.strftime("%B %d, %Y"),
+                        "sat_key":        sat_key,
+                        "location_label": location_label,
+                    }
+                else:
+                    st.warning("NDSI render failed. Try a different scene or location.")
+
+        # --- Display NDVI ---
+        if st.session_state.se_ndvi_arr is not None:
+            info = st.session_state.se_ndvi_info
+            st.divider()
+            col_img, col_scale = st.columns([3, 2])
+            with col_img:
+                st.image(
+                    st.session_state.se_ndvi_arr,
+                    caption=f"NDVI — {info['location_label']} — {info['scene_date']}",
+                    use_container_width=True,
+                )
+            with col_scale:
+                st.markdown("**NDVI — Normalized Difference Vegetation Index**")
+                st.markdown(
+                    "Formula: **(NIR − Red) / (NIR + Red)**\n\n"
+                    "Healthy plants absorb red light for photosynthesis and reflect "
+                    "NIR strongly. Bare soil reflects both evenly. Water absorbs both."
+                )
+                st.markdown("**Colour scale (green = high, red = low):**")
+                st.markdown(
+                    "| Value | What it means |\n"
+                    "|---|---|\n"
+                    "| 0.6 – 1.0 | Dense healthy vegetation (forest, healthy crops) |\n"
+                    "| 0.4 – 0.6 | Moderate vegetation (scrubland, stressed crops) |\n"
+                    "| 0.2 – 0.4 | Sparse or degraded vegetation |\n"
+                    "| 0.1 – 0.2 | Bare soil with minor vegetation |\n"
+                    "| < 0.1     | Bare soil, rock, sand |\n"
+                    "| Negative  | Water, snow, cloud |"
+                )
+
+        # --- Display NDWI ---
+        if st.session_state.se_ndwi_arr is not None:
+            info = st.session_state.se_ndwi_info
+            st.divider()
+            col_img, col_scale = st.columns([3, 2])
+            with col_img:
+                st.image(
+                    st.session_state.se_ndwi_arr,
+                    caption=f"NDWI — {info['location_label']} — {info['scene_date']}",
+                    use_container_width=True,
+                )
+            with col_scale:
+                st.markdown("**NDWI — Normalized Difference Water Index**")
+                st.markdown(
+                    "Formula: **(Green − NIR) / (Green + NIR)**\n\n"
+                    "Water reflects green light and absorbs NIR. Vegetation absorbs "
+                    "green and reflects NIR — the opposite. This contrast isolates "
+                    "open water bodies."
+                )
+                st.markdown("**Colour scale (blue = high water content):**")
+                st.markdown(
+                    "| Value | What it means |\n"
+                    "|---|---|\n"
+                    "| > 0.3    | Open water (lake, river, ocean) |\n"
+                    "| 0.1 – 0.3 | Shallow or turbid water, flooded soil |\n"
+                    "| -0.1 – 0.1 | Moist soil, wetlands |\n"
+                    "| < -0.1   | Dry soil or vegetation |\n"
+                    "| Very negative | Dry desert or dense urban |"
+                )
+
+        # --- Display NDSI ---
+        if st.session_state.se_ndsi_arr is not None:
+            info = st.session_state.se_ndsi_info
+            st.divider()
+            col_img, col_scale = st.columns([3, 2])
+            with col_img:
+                st.image(
+                    st.session_state.se_ndsi_arr,
+                    caption=f"NDSI — {info['location_label']} — {info['scene_date']}",
+                    use_container_width=True,
+                )
+            with col_scale:
+                st.markdown("**NDSI — Normalized Difference Snow Index**")
+                st.markdown(
+                    "Formula: **(Green − SWIR1) / (Green + SWIR1)**\n\n"
+                    "Snow reflects green light strongly but absorbs shortwave infrared "
+                    "(SWIR). Bare ground and vegetation do the opposite. Values above "
+                    "0.4 are the standard threshold for classifying a pixel as "
+                    "snow-covered."
+                )
+                st.markdown("**Colour scale (blue = snow/ice, red = bare):**")
+                st.markdown(
+                    "| Value | What it means |\n"
+                    "|---|---|\n"
+                    "| > 0.4    | Snow or ice covered |\n"
+                    "| 0.2 – 0.4 | Partial snow cover or wet/melting snow |\n"
+                    "| 0.0 – 0.2 | Snow-free, possible soil moisture |\n"
+                    "| < 0.0    | Dry bare ground, rock, or vegetation |\n"
+                    "| Very negative | Dense vegetation or dry desert |"
+                )
 
     # Stop here — do not render the EO Explorer below
     st.stop()
@@ -2323,7 +2517,7 @@ with col_b:
 
 st.divider()
 st.caption(
-    "EOIL Portal v1.7 — Earth Observation Innovation Lab. "
+    "EOIL Portal v1.8 — Earth Observation Innovation Lab. "
     "Built with Claude Code. "
     "Login and access controls will be added in a future version."
 )

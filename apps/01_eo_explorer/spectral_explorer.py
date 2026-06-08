@@ -274,6 +274,55 @@ def render_ndwi(item, satellite_key: str, width: int = 600,
         return None
 
 
+def render_ndsi(item, satellite_key: str, width: int = 600,
+                bbox: list = None) -> np.ndarray | None:
+    """
+    Render an NDSI map (snow and ice index).
+    NDSI = (Green - SWIR1) / (Green + SWIR1).
+    Uses a red-to-blue colormap: blue = snow/ice present, red = bare ground.
+
+    Sentinel-2: SWIR1 = B11 (1610 nm).
+    Landsat 8/9: SWIR1 = B6 (swir16, 1609 nm).
+
+    Values above 0.4 are conventionally classified as snow-covered.
+    bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
+    """
+    sat = satellite_catalog.SATELLITES[satellite_key]
+    if sat.get("sar"):
+        return None
+
+    if satellite_key == "Sentinel-2 L2A":
+        expression = "(B03-B11)/(B03+B11)"
+    elif satellite_key == "Landsat 8/9":
+        expression = "(green-swir16)/(green+swir16)"
+    else:
+        return None
+
+    params = [
+        ("collection",    sat["collection"]),
+        ("item",          item.id),
+        ("expression",    expression),
+        ("colormap_name", "RdBu"),   # red = no snow, blue = snow/ice
+        ("rescale",       "-1,1"),
+        ("width",         str(width)),
+        ("height",        str(width)),
+    ]
+
+    try:
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        if resp.status_code != 200:
+            return None
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        arr = np.array(img)
+        if bbox:
+            arr = _clip_to_bbox(arr, item.bbox, bbox)
+        else:
+            arr = _crop_to_valid(arr)
+        return arr
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Contact sheet (all presets as thumbnails)
 # ---------------------------------------------------------------------------
@@ -281,11 +330,12 @@ def render_ndwi(item, satellite_key: str, width: int = 600,
 def render_contact_sheet(item, satellite_key: str,
                           include_ndvi: bool = True,
                           include_ndwi: bool = True,
+                          include_ndsi: bool = True,
                           thumb_size: int = 300,
                           bbox: list = None) -> list:
     """
     Render every named preset for the selected satellite as a small thumbnail.
-    Also renders NDVI and NDWI if requested and supported.
+    Also renders NDVI, NDWI, and NDSI if requested and supported.
 
     Returns a list of dicts: [{label, note, array}, ...]
     Arrays are numpy uint8. None means the render failed.
@@ -341,6 +391,20 @@ def render_contact_sheet(item, satellite_key: str,
         results.append({
             "label":    "NDWI",
             "note":     "Water body index. Bright blue = open water.",
+            "array":    arr,
+            "type":     "index",
+            "channels": f"Expression: {expr}",
+        })
+
+    if include_ndsi and not sat.get("sar"):
+        arr = render_ndsi(item, satellite_key, width=thumb_size, bbox=bbox)
+        if satellite_key == "Sentinel-2 L2A":
+            expr = "(B03 − B11) / (B03 + B11)"
+        else:
+            expr = "(Green − SWIR1) / (Green + SWIR1)"
+        results.append({
+            "label":    "NDSI",
+            "note":     "Snow and ice index. Blue = snow/ice present. Red = bare ground.",
             "array":    arr,
             "type":     "index",
             "channels": f"Expression: {expr}",
