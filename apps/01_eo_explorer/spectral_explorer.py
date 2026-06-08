@@ -173,6 +173,9 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
             # which pixel rows and columns correspond to the desired bbox.
             # This avoids relying on any undocumented API crop endpoint.
             arr = _clip_to_bbox(arr, item.bbox, bbox)
+            # Pad extreme aspect ratios so large radius selections don't
+            # produce unreasonably tall or wide images in the display.
+            arr = _pad_to_ratio(arr)
         else:
             # Remove black nodata borders from full-tile renders.
             arr = _crop_to_valid(arr)
@@ -180,57 +183,6 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
         return arr
 
     except Exception:
-        return None
-
-
-def _render_index(item, satellite_key: str, assets: list, expression: str,
-                   colormap: str, width: int, bbox: list) -> np.ndarray | None:
-    """
-    Shared helper for all three spectral index renders (NDVI, NDWI, NDSI).
-
-    The PC Rendering API requires explicit `assets` parameters even when using
-    an `expression` — the API needs to know which COG files to open before it
-    can apply the band-math formula.
-
-    assets:     list of band asset names to load, e.g. ["B08", "B04"]
-    expression: band-math string, e.g. "(B08-B04)/(B08+B04)"
-    colormap:   lowercase matplotlib colormap name, e.g. "rdylgn"
-    """
-    sat = satellite_catalog.SATELLITES[satellite_key]
-
-    # Build params — assets listed first, then asset_as_band=True so the
-    # expression parser can reference them by name (e.g. "B08") rather than
-    # by positional index (b1, b2). Without this flag the API returns 400.
-    params = [
-        ("collection",    sat["collection"]),
-        ("item",          item.id),
-    ]
-    for asset in assets:
-        params.append(("assets", asset))
-    params += [
-        ("asset_as_band", "True"),
-        ("expression",    expression),
-        ("colormap_name", colormap),
-        ("rescale",       "-1,1"),
-        ("width",         str(width)),
-        ("height",        str(width)),
-    ]
-
-    try:
-        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
-        if resp.status_code != 200:
-            # Log status and first 200 chars of the error body for debugging
-            print(f"[index render] HTTP {resp.status_code}: {resp.text[:200]}")
-            return None
-        img = Image.open(BytesIO(resp.content)).convert("RGB")
-        arr = np.array(img)
-        if bbox:
-            arr = _clip_to_bbox(arr, item.bbox, bbox)
-        else:
-            arr = _crop_to_valid(arr)
-        return arr
-    except Exception as e:
-        print(f"[index render] Exception: {e}")
         return None
 
 
@@ -247,15 +199,34 @@ def render_ndvi(item, satellite_key: str, width: int = 600,
         return None
 
     if satellite_key == "Sentinel-2 L2A":
-        assets     = ["B08", "B04"]
         expression = "(B08-B04)/(B08+B04)"
     elif satellite_key == "Landsat 8/9":
-        assets     = ["nir08", "red"]
         expression = "(nir08-red)/(nir08+red)"
     else:
         return None
 
-    return _render_index(item, satellite_key, assets, expression, "rdylgn", width, bbox)
+    params = [
+        ("collection",    sat["collection"]),
+        ("item",          item.id),
+        ("expression",    expression),
+        ("colormap_name", "rdylgn"),
+        ("rescale",       "-1,1"),
+        ("width",         str(width)),
+        ("height",        str(width)),
+    ]
+    try:
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        if resp.status_code != 200:
+            return None
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        arr = np.array(img)
+        if bbox:
+            arr = _clip_to_bbox(arr, item.bbox, bbox)
+        else:
+            arr = _crop_to_valid(arr)
+        return arr
+    except Exception:
+        return None
 
 
 def render_ndwi(item, satellite_key: str, width: int = 600,
@@ -271,44 +242,34 @@ def render_ndwi(item, satellite_key: str, width: int = 600,
         return None
 
     if satellite_key == "Sentinel-2 L2A":
-        assets     = ["B03", "B08"]
         expression = "(B03-B08)/(B03+B08)"
     elif satellite_key == "Landsat 8/9":
-        assets     = ["green", "nir08"]
         expression = "(green-nir08)/(green+nir08)"
     else:
         return None
 
-    return _render_index(item, satellite_key, assets, expression, "blues", width, bbox)
-
-
-def render_ndsi(item, satellite_key: str, width: int = 600,
-                bbox: list = None) -> np.ndarray | None:
-    """
-    Render an NDSI map (snow and ice index).
-    NDSI = (Green - SWIR1) / (Green + SWIR1).
-    Red-blue colormap: blue = snow/ice present, red = bare ground.
-
-    Sentinel-2: SWIR1 = B11 (1610 nm).
-    Landsat 8/9: SWIR1 = swir16 (1609 nm).
-
-    Values above 0.4 are the standard threshold for snow classification.
-    bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
-    """
-    sat = satellite_catalog.SATELLITES[satellite_key]
-    if sat.get("sar"):
+    params = [
+        ("collection",    sat["collection"]),
+        ("item",          item.id),
+        ("expression",    expression),
+        ("colormap_name", "blues"),
+        ("rescale",       "-1,1"),
+        ("width",         str(width)),
+        ("height",        str(width)),
+    ]
+    try:
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        if resp.status_code != 200:
+            return None
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        arr = np.array(img)
+        if bbox:
+            arr = _clip_to_bbox(arr, item.bbox, bbox)
+        else:
+            arr = _crop_to_valid(arr)
+        return arr
+    except Exception:
         return None
-
-    if satellite_key == "Sentinel-2 L2A":
-        assets     = ["B03", "B11"]
-        expression = "(B03-B11)/(B03+B11)"
-    elif satellite_key == "Landsat 8/9":
-        assets     = ["green", "swir16"]
-        expression = "(green-swir16)/(green+swir16)"
-    else:
-        return None
-
-    return _render_index(item, satellite_key, assets, expression, "rdbu", width, bbox)
 
 
 # ---------------------------------------------------------------------------
@@ -318,12 +279,11 @@ def render_ndsi(item, satellite_key: str, width: int = 600,
 def render_contact_sheet(item, satellite_key: str,
                           include_ndvi: bool = True,
                           include_ndwi: bool = True,
-                          include_ndsi: bool = True,
                           thumb_size: int = 300,
                           bbox: list = None) -> list:
     """
     Render every named preset for the selected satellite as a small thumbnail.
-    Also renders NDVI, NDWI, and NDSI if requested and supported.
+    Also renders NDVI and NDWI if requested and supported.
 
     Returns a list of dicts: [{label, note, array}, ...]
     Arrays are numpy uint8. None means the render failed.
@@ -379,20 +339,6 @@ def render_contact_sheet(item, satellite_key: str,
         results.append({
             "label":    "NDWI",
             "note":     "Water body index. Bright blue = open water.",
-            "array":    arr,
-            "type":     "index",
-            "channels": f"Expression: {expr}",
-        })
-
-    if include_ndsi and not sat.get("sar"):
-        arr = render_ndsi(item, satellite_key, width=thumb_size, bbox=bbox)
-        if satellite_key == "Sentinel-2 L2A":
-            expr = "(B03 − B11) / (B03 + B11)"
-        else:
-            expr = "(Green − SWIR1) / (Green + SWIR1)"
-        results.append({
-            "label":    "NDSI",
-            "note":     "Snow and ice index. Blue = snow/ice present. Red = bare ground.",
             "array":    arr,
             "type":     "index",
             "channels": f"Expression: {expr}",
@@ -515,6 +461,43 @@ def explain_combination(r_band: str, g_band: str, b_band: str,
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _pad_to_ratio(arr: np.ndarray, max_ratio: float = 2.0) -> np.ndarray:
+    """
+    Pad a rendered array with black pixels to prevent extreme aspect ratios.
+
+    When a large map picker radius is selected, the clipped region can be
+    much taller than it is wide (or vice versa), producing a very long image
+    in the display. This pads the shorter dimension with black so the final
+    image is never more than max_ratio:1 in either direction.
+
+    max_ratio=2.0 means: width can be at most 2× the height, and vice versa.
+    """
+    h, w = arr.shape[:2]
+    if h == 0 or w == 0:
+        return arr
+
+    ratio = max(w / h, h / w)
+    if ratio <= max_ratio:
+        return arr
+
+    channels = arr.shape[2] if arr.ndim == 3 else 1
+
+    if w > h:
+        # Wider than tall — pad top and bottom
+        new_h = int(w / max_ratio)
+        pad   = (new_h - h) // 2
+        out   = np.zeros((new_h, w, channels), dtype=arr.dtype)
+        out[pad:pad + h, :] = arr
+    else:
+        # Taller than wide — pad left and right
+        new_w = int(h / max_ratio)
+        pad   = (new_w - w) // 2
+        out   = np.zeros((h, new_w, channels), dtype=arr.dtype)
+        out[:, pad:pad + w] = arr
+
+    return out
+
 
 def _clip_to_bbox(arr: np.ndarray, item_bbox: list, clip_bbox: list) -> np.ndarray:
     """
