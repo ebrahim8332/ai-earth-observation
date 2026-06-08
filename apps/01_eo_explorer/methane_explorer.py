@@ -278,14 +278,36 @@ def build_emissions_map(image, gas_key, bbox, actual_date):
             opacity = 0.85,
         ).add_to(m)
 
-        # Colorbar legend — default branca positioning (bottom-right of map)
+        # Colorbar legend with formatted tick labels.
+        # Small-value gases (NO2, CO, SO2) have 5+ decimal places that
+        # compress badly at default formatting. We generate 6 evenly-spaced
+        # ticks and format them based on the value magnitude.
+        vmin = cfg["min_val"]
+        vmax = cfg["max_val"]
+        n    = 6
+        ticks = [vmin + (vmax - vmin) * i / (n - 1) for i in range(n)]
+
+        magnitude = max(abs(vmin), abs(vmax))
+        if magnitude < 0.001:
+            # Scientific notation — e.g. 2.0e-04
+            tick_labels = [f"{v:.1e}" for v in ticks]
+        elif magnitude < 0.1:
+            # Three decimal places — e.g. 0.020
+            tick_labels = [f"{v:.3f}" for v in ticks]
+        elif magnitude > 100:
+            # Integers — e.g. 1900
+            tick_labels = [f"{v:.0f}" for v in ticks]
+        else:
+            tick_labels = [f"{v:.3f}" for v in ticks]
+
         colormap = cm.LinearColormap(
-            colors   = cfg["palette"],
-            vmin     = cfg["min_val"],
-            vmax     = cfg["max_val"],
-            caption  = f"{gas_key} ({cfg['unit']})",
+            colors      = cfg["palette"],
+            vmin        = vmin,
+            vmax        = vmax,
+            caption     = f"{gas_key} ({cfg['unit']})",
+            tick_labels = tick_labels,
         )
-        colormap.width = 300
+        colormap.width = 320
         colormap.add_to(m)
 
         folium.LayerControl().add_to(m)
