@@ -172,15 +172,30 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
             # Clip locally: use the item's known geographic extent to compute
             # which pixel rows and columns correspond to the desired bbox.
             # This avoids relying on any undocumented API crop endpoint.
-            arr = _clip_to_bbox(arr, item.bbox, bbox)
-            # Remove nodata (black) borders within the clipped region.
-            # The tile footprint is a diagonal parallelogram — the selected
-            # bbox may extend outside it, leaving black nodata strips.
-            # skip_ratio_guard=True because _pad_to_ratio handles shape next.
-            arr = _crop_to_valid(arr, skip_ratio_guard=True)
-            # Pad extreme aspect ratios so large radius selections don't
-            # produce unreasonably tall or wide images in the display.
-            arr = _pad_to_ratio(arr)
+            clipped = _clip_to_bbox(arr, item.bbox, bbox)
+
+            # Remove nodata borders from within the clipped region.
+            # The tile footprint is a diagonal parallelogram — parts of the
+            # selected bbox may fall outside it, leaving black nodata strips.
+            cropped = _crop_to_valid(clipped, skip_ratio_guard=True)
+
+            # Coverage check: if valid pixels cover less than 15% of the
+            # clipped area, this scene barely overlaps the selected location.
+            # Fall back to the full-tile view so the user still gets a useful
+            # image rather than a thin sliver or mostly-black result.
+            clip_pixels  = clipped.shape[0] * clipped.shape[1]
+            crop_pixels  = cropped.shape[0] * cropped.shape[1]
+            coverage_ok  = clip_pixels > 0 and (crop_pixels / clip_pixels) >= 0.15
+
+            if coverage_ok:
+                # Pad only for genuinely extreme aspect ratios (4:1+).
+                # This handles very large radius selections without adding
+                # unnecessary black borders to normal rectangular clips.
+                arr = _pad_to_ratio(cropped, max_ratio=4.0)
+            else:
+                # Not enough coverage in the selected area — show the full
+                # tile crop instead so the user always gets a usable image.
+                arr = _crop_to_valid(arr)
         else:
             # Remove black nodata borders from full-tile renders.
             arr = _crop_to_valid(arr)
