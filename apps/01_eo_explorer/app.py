@@ -66,7 +66,7 @@ with st.sidebar:
     st.markdown("### Module")
     selected_module = st.radio(
         "Navigate",
-        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "📡 SAR Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter"],
+        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer"],
         label_visibility="collapsed",
     )
     st.divider()
