@@ -769,8 +769,9 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         ("se_prev_preset",     None),
         ("se_rendered_arr",    None),
         ("se_rendered_info",   None),
-        ("se_contact_results", None),
-        ("se_contact_info",    None),
+        ("se_contact_results",   None),
+        ("se_contact_info",      None),
+        ("se_selected_item_id",  None),
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
@@ -850,6 +851,7 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         st.session_state.se_best_item        = None
         st.session_state.se_rendered_arr     = None
         st.session_state.se_contact_results  = None
+        st.session_state.se_selected_item_id = None
 
     # -----------------------------------------------------------------------
     # Row 2: Date range + Cloud cover + Search button
@@ -891,6 +893,7 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     )
                     st.session_state.se_items          = items
                     st.session_state.se_timeline_items = items
+                    st.session_state.se_selected_item_id = None  # reset on new search
                 except Exception as e:
                     st.error(f"Search failed: {e}")
                     items = []
@@ -940,6 +943,48 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                 bar       = "█" * int(pct / 10) + "░" * (10 - int(pct / 10))
                 cloud_str = f"Cloud {cloud:.0f}%" if sat_info["cloud_field"] else "SAR"
                 st.caption(f"`{date_str}`  {cloud_str}  Coverage: {bar} {pct:.0f}%")
+
+        # -------------------------------------------------------------------
+        # SCENE SELECTOR — lets the user pick any scene from the search results
+        # instead of always using the auto-selected best scene.
+        # Useful when the best scene is from a tile that covers a neighbouring
+        # area (e.g. Zanzibar when you searched for mainland Tanzania).
+        # -------------------------------------------------------------------
+        _all_items = st.session_state.se_items
+        if _all_items:
+            # Build a label for each scene: "Dec 12, 2025 — Cloud 1.6%"
+            # For SAR satellites there is no cloud cover field.
+            def _scene_label(it):
+                d = it.datetime.strftime("%b %d, %Y")
+                cf = sat_info.get("cloud_field")
+                if cf:
+                    c = it.properties.get(cf, 0)
+                    return f"{d}  —  Cloud {c:.1f}%"
+                return d
+
+            _labels   = [_scene_label(it) for it in _all_items]
+            _item_ids = [it.id for it in _all_items]
+
+            # Default to whichever scene was auto-selected (best coverage)
+            _best = st.session_state.get("se_best_item")
+            if _best and _best.id in _item_ids:
+                _default_idx = _item_ids.index(_best.id)
+            else:
+                _default_idx = 0
+
+            # If user previously selected a scene, keep that selection
+            _prev_id = st.session_state.get("se_selected_item_id")
+            if _prev_id and _prev_id in _item_ids:
+                _default_idx = _item_ids.index(_prev_id)
+
+            _chosen_label = st.selectbox(
+                "Scene — select which satellite pass to render",
+                options=_labels,
+                index=_default_idx,
+                key="se_scene_selector",
+            )
+            _chosen_idx = _labels.index(_chosen_label)
+            st.session_state.se_selected_item_id = _item_ids[_chosen_idx]
 
     # -----------------------------------------------------------------------
     # Row 3: Band assignment
@@ -1074,9 +1119,14 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
     # RENDER — runs only when button clicked, stores result in session state
     # -----------------------------------------------------------------------
     if render_btn:
-        item = st.session_state.se_best_item
-        if item is None and st.session_state.se_items:
-            item = st.session_state.se_items[0]
+        # Use the user's chosen scene if set; otherwise fall back to best/first
+        _sel_id  = st.session_state.get("se_selected_item_id")
+        _all     = st.session_state.se_items
+        item     = next((it for it in _all if it.id == _sel_id), None)
+        if item is None:
+            item = st.session_state.se_best_item
+        if item is None and _all:
+            item = _all[0]
 
         if item is None:
             st.warning("Search for scenes first.")
@@ -1169,9 +1219,13 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
     # COMPARE ALL VIEWS — runs only when button clicked
     # -----------------------------------------------------------------------
     if contact_btn:
-        item = st.session_state.se_best_item
-        if item is None and st.session_state.se_items:
-            item = st.session_state.se_items[0]
+        _sel_id  = st.session_state.get("se_selected_item_id")
+        _all     = st.session_state.se_items
+        item     = next((it for it in _all if it.id == _sel_id), None)
+        if item is None:
+            item = st.session_state.se_best_item
+        if item is None and _all:
+            item = _all[0]
 
         if item is None:
             st.warning("Search for scenes first.")
