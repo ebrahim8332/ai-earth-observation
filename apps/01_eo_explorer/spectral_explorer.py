@@ -561,11 +561,25 @@ def _crop_to_valid(arr: np.ndarray, threshold: int = 5) -> np.ndarray:
     """
     Crop a numpy image array to the bounding box of non-black pixels.
     Removes the large black nodata borders that satellite tiles contain.
-    If the entire image is black, returns the original array unchanged.
+
+    Safety guard: if the crop would produce an extreme aspect ratio (more than
+    3:1 in either direction), the original uncropped array is returned instead.
+    This prevents thin-strip thumbnails when a tile only marginally overlaps
+    the search area and valid pixels are confined to one edge.
     """
     valid = arr.max(axis=2) > threshold
     if not valid.any():
         return arr
     rows = np.where(valid.any(axis=1))[0]
     cols = np.where(valid.any(axis=0))[0]
-    return arr[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
+    cropped = arr[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
+
+    # Reject degenerate crops — return original if aspect ratio exceeds 3:1
+    h, w = cropped.shape[:2]
+    if h == 0 or w == 0:
+        return arr
+    ratio = max(w / h, h / w)
+    if ratio > 3.0:
+        return arr
+
+    return cropped
