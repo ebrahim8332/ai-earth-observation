@@ -179,22 +179,28 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
             # selected bbox may fall outside it, leaving black nodata strips.
             cropped = _crop_to_valid(clipped, skip_ratio_guard=True)
 
-            # Coverage check: if valid pixels cover less than 15% of the
-            # clipped area, this scene barely overlaps the selected location.
-            # Fall back to the full-tile view so the user still gets a useful
-            # image rather than a thin sliver or mostly-black result.
+            # Decide whether the clip is usable:
+            #   - ≥40% of the clipped area must be valid (non-black) pixels
+            #   - the cropped shape must not be a thin strip (≤3:1 ratio)
+            # If either condition fails the tile doesn't cover this location
+            # well. Fall back to the full-tile view so the user always gets
+            # a useful, properly-shaped image.
             clip_pixels  = clipped.shape[0] * clipped.shape[1]
             crop_pixels  = cropped.shape[0] * cropped.shape[1]
-            coverage_ok  = clip_pixels > 0 and (crop_pixels / clip_pixels) >= 0.15
+            ch, cw       = cropped.shape[:2]
+            crop_ratio   = max(ch / cw, cw / ch) if ch > 0 and cw > 0 else 99
 
-            if coverage_ok:
-                # Pad only for genuinely extreme aspect ratios (4:1+).
-                # This handles very large radius selections without adding
-                # unnecessary black borders to normal rectangular clips.
-                arr = _pad_to_ratio(cropped, max_ratio=4.0)
+            good_clip = (
+                clip_pixels > 0
+                and (crop_pixels / clip_pixels) >= 0.40
+                and crop_ratio <= 3.0
+            )
+
+            if good_clip:
+                arr = cropped
             else:
-                # Not enough coverage in the selected area — show the full
-                # tile crop instead so the user always gets a usable image.
+                # Scene doesn't cover the selected area well enough.
+                # Show the full tile so the user still gets a useful image.
                 arr = _crop_to_valid(arr)
         else:
             # Remove black nodata borders from full-tile renders.
