@@ -183,33 +183,31 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
         return None
 
 
-def render_ndvi(item, satellite_key: str, width: int = 600,
-                bbox: list = None) -> np.ndarray | None:
+def _render_index(item, satellite_key: str, assets: list, expression: str,
+                   colormap: str, width: int, bbox: list) -> np.ndarray | None:
     """
-    Render an NDVI map using the titiler expression endpoint.
-    NDVI = (NIR - Red) / (NIR + Red).
-    Uses a red-yellow-green colormap: red = bare/stressed, green = healthy vegetation.
+    Shared helper for all three spectral index renders (NDVI, NDWI, NDSI).
 
-    Only supported for optical satellites (Sentinel-2 and Landsat).
-    bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
+    The PC Rendering API requires explicit `assets` parameters even when using
+    an `expression` — the API needs to know which COG files to open before it
+    can apply the band-math formula.
+
+    assets:     list of band asset names to load, e.g. ["B08", "B04"]
+    expression: band-math string, e.g. "(B08-B04)/(B08+B04)"
+    colormap:   lowercase matplotlib colormap name, e.g. "rdylgn"
     """
     sat = satellite_catalog.SATELLITES[satellite_key]
-    if sat.get("sar"):
-        return None
 
-    # Band names differ by satellite
-    if satellite_key == "Sentinel-2 L2A":
-        expression = "(B08-B04)/(B08+B04)"
-    elif satellite_key == "Landsat 8/9":
-        expression = "(nir08-red)/(nir08+red)"
-    else:
-        return None
-
+    # Build params — assets must be listed before expression
     params = [
         ("collection",    sat["collection"]),
         ("item",          item.id),
+    ]
+    for asset in assets:
+        params.append(("assets", asset))
+    params += [
         ("expression",    expression),
-        ("colormap_name", "rdylgn"),
+        ("colormap_name", colormap),
         ("rescale",       "-1,1"),
         ("width",         str(width)),
         ("height",        str(width)),
@@ -218,6 +216,8 @@ def render_ndvi(item, satellite_key: str, width: int = 600,
     try:
         resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
         if resp.status_code != 200:
+            # Log status and first 200 chars of the error body for debugging
+            print(f"[index render] HTTP {resp.status_code}: {resp.text[:200]}")
             return None
         img = Image.open(BytesIO(resp.content)).convert("RGB")
         arr = np.array(img)
@@ -226,16 +226,41 @@ def render_ndvi(item, satellite_key: str, width: int = 600,
         else:
             arr = _crop_to_valid(arr)
         return arr
-    except Exception:
+    except Exception as e:
+        print(f"[index render] Exception: {e}")
         return None
+
+
+def render_ndvi(item, satellite_key: str, width: int = 600,
+                bbox: list = None) -> np.ndarray | None:
+    """
+    Render an NDVI map using the PC titiler expression endpoint.
+    NDVI = (NIR - Red) / (NIR + Red).
+    Red-yellow-green colormap: green = healthy vegetation, red = bare/stressed.
+    bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
+    """
+    sat = satellite_catalog.SATELLITES[satellite_key]
+    if sat.get("sar"):
+        return None
+
+    if satellite_key == "Sentinel-2 L2A":
+        assets     = ["B08", "B04"]
+        expression = "(B08-B04)/(B08+B04)"
+    elif satellite_key == "Landsat 8/9":
+        assets     = ["nir08", "red"]
+        expression = "(nir08-red)/(nir08+red)"
+    else:
+        return None
+
+    return _render_index(item, satellite_key, assets, expression, "rdylgn", width, bbox)
 
 
 def render_ndwi(item, satellite_key: str, width: int = 600,
                 bbox: list = None) -> np.ndarray | None:
     """
-    Render an NDWI map (water index).
+    Render an NDWI map (water body index).
     NDWI = (Green - NIR) / (Green + NIR).
-    Uses a blue colormap: bright blue = open water.
+    Blue colormap: bright blue = open water.
     bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
     """
     sat = satellite_catalog.SATELLITES[satellite_key]
@@ -243,35 +268,15 @@ def render_ndwi(item, satellite_key: str, width: int = 600,
         return None
 
     if satellite_key == "Sentinel-2 L2A":
+        assets     = ["B03", "B08"]
         expression = "(B03-B08)/(B03+B08)"
     elif satellite_key == "Landsat 8/9":
+        assets     = ["green", "nir08"]
         expression = "(green-nir08)/(green+nir08)"
     else:
         return None
 
-    params = [
-        ("collection",    sat["collection"]),
-        ("item",          item.id),
-        ("expression",    expression),
-        ("colormap_name", "blues"),
-        ("rescale",       "-1,1"),
-        ("width",         str(width)),
-        ("height",        str(width)),
-    ]
-
-    try:
-        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
-        if resp.status_code != 200:
-            return None
-        img = Image.open(BytesIO(resp.content)).convert("RGB")
-        arr = np.array(img)
-        if bbox:
-            arr = _clip_to_bbox(arr, item.bbox, bbox)
-        else:
-            arr = _crop_to_valid(arr)
-        return arr
-    except Exception:
-        return None
+    return _render_index(item, satellite_key, assets, expression, "blues", width, bbox)
 
 
 def render_ndsi(item, satellite_key: str, width: int = 600,
@@ -279,12 +284,12 @@ def render_ndsi(item, satellite_key: str, width: int = 600,
     """
     Render an NDSI map (snow and ice index).
     NDSI = (Green - SWIR1) / (Green + SWIR1).
-    Uses a red-to-blue colormap: blue = snow/ice present, red = bare ground.
+    Red-blue colormap: blue = snow/ice present, red = bare ground.
 
     Sentinel-2: SWIR1 = B11 (1610 nm).
-    Landsat 8/9: SWIR1 = B6 (swir16, 1609 nm).
+    Landsat 8/9: SWIR1 = swir16 (1609 nm).
 
-    Values above 0.4 are conventionally classified as snow-covered.
+    Values above 0.4 are the standard threshold for snow classification.
     bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
     """
     sat = satellite_catalog.SATELLITES[satellite_key]
@@ -292,27 +297,15 @@ def render_ndsi(item, satellite_key: str, width: int = 600,
         return None
 
     if satellite_key == "Sentinel-2 L2A":
+        assets     = ["B03", "B11"]
         expression = "(B03-B11)/(B03+B11)"
     elif satellite_key == "Landsat 8/9":
+        assets     = ["green", "swir16"]
         expression = "(green-swir16)/(green+swir16)"
     else:
         return None
 
-    params = [
-        ("collection",    sat["collection"]),
-        ("item",          item.id),
-        ("expression",    expression),
-        ("colormap_name", "RdBu"),   # red = no snow, blue = snow/ice
-        ("rescale",       "-1,1"),
-        ("width",         str(width)),
-        ("height",        str(width)),
-    ]
-
-    try:
-        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
-        if resp.status_code != 200:
-            return None
-        img = Image.open(BytesIO(resp.content)).convert("RGB")
+    return _render_index(item, satellite_key, assets, expression, "rdbu", width, bbox)
         arr = np.array(img)
         if bbox:
             arr = _clip_to_bbox(arr, item.bbox, bbox)
