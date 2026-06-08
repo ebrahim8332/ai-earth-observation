@@ -171,24 +171,116 @@ Update the checkbox and add a one-line note after each day is complete.
 - [x] Day 7: SAR Explorer module — Sentinel-1 VV/VH/false color/change map; Welcome panel; bbox size warning
 - [x] Day 8: Week 1 primer doc; EVI, NDWI, Burned Area added to Time Series Explorer; Landsat performance warning
 
-### Revised Plan (agreed Day 12 session)
+### Revised Plan (agreed Day 12 session — updated after Day 12 review)
 
-**Guiding principle:** Option A throughout. Conceptual demonstration, not deep implementation.
-No real operational data required. Every module must be understandable to a non-specialist
-and demonstrable in a 10-minute conversation. AI present in every module — extracting meaning,
-flagging anomalies, or explaining what an algorithm found.
+---
+
+## Guiding Principles for All Remaining Days
+
+**Option A throughout.** Conceptual demonstration, not deep implementation.
+No real operational data required. Every module must be understandable to a
+non-specialist and demonstrable in a 10-minute conversation.
+
+**Two-layer AI structure in every module.**
+Classical ML or deep learning finds the pattern.
+Generative AI (Groq/Gemini) explains what it means.
+These two layers are visually distinct in the UI.
+Never use generative AI alone as a substitute for real analysis.
+
+**The division of labor:**
+- ML/algorithms: clustering, classification, anomaly detection, segmentation, PCA
+- Generative AI: interpretation, explanation, recommended action, narrative output
+
+**Why this matters.**
+The world is moving to AI-native workflows. But generative AI alone is not enough.
+It describes. It does not find. Classical ML and deep learning find patterns in data.
+Generative AI explains what those patterns mean. Both together is the correct architecture.
+
+---
+
+## Day-by-Day Plan (Days 13–19)
+
+### Day 13 — Vegetation Encroachment Detection
+**Utility relevance:** Electric transmission and distribution right-of-way monitoring.
+**ML layer:** K-means clustering on NDVI and spectral bands to segment land cover.
+Flag pixels that cross into the right-of-way buffer zone.
+**Generative AI layer:** Explains what each cluster represents. Describes encroachment
+risk level. Recommends action (immediate inspection vs scheduled maintenance).
+**Key concept to teach:** Unsupervised classification — the algorithm groups pixels
+by similarity without being told what to look for.
+
+### Day 14 — Ground Movement and Subsidence
+**Utility relevance:** Pipeline integrity, underground cable and conduit monitoring.
+**ML layer:** PCA on multi-date Sentinel-1 coherence stack to find change dimensions.
+Statistical threshold to flag subsidence zones.
+**Generative AI layer:** Interprets the coherence loss pattern. Explains infrastructure
+risk. Flags which asset types are most exposed.
+**Key concept to teach:** InSAR coherence — how radar phase difference detects
+millimetre-scale ground movement over time.
+
+### Day 15 — LiDAR for Infrastructure
+**Utility relevance:** Utility vegetation management, clearance distance compliance.
+**ML layer:** DBSCAN clustering to identify individual tree crowns from point cloud.
+Height threshold classification to flag clearance violations.
+**Generative AI layer:** Explains what clearance distances mean for T&D lines.
+Interprets risk zones. Recommends inspection priority by severity.
+**Key concept to teach:** What LiDAR sees that satellites cannot — vertical structure,
+canopy height, ground elevation beneath tree cover.
+
+### Day 16 — Drone Imagery and AI Defect Detection
+**Utility relevance:** Asset inspection, maintenance prioritisation, defect logging.
+**ML layer:** CNN transfer learning concept. Show how a pretrained model is fine-tuned
+on defect images. Visualise what the model responds to (activation maps concept).
+**Generative AI layer:** Classifies defect type and severity from image description.
+Recommends inspection priority. This is the module where deep learning and generative
+AI combine most naturally.
+**Key concept to teach:** The resolution gap — what satellites see vs what drones see.
+Transfer learning — reusing a model trained on one task for a related task.
+
+### Day 17 — Anomaly Detection
+**Utility relevance:** Operational monitoring without labeled training data.
+**ML layer:** Isolation Forest on NDVI or LST time series. Flags deviations without
+labeled anomalies. Z-score baseline for comparison. Show the algorithm learning
+what normal looks like.
+**Generative AI layer:** Explains why a flagged point is anomalous. Suggests likely
+cause — drought, fire, equipment failure, vegetation die-off. Recommends follow-up.
+**Key concept to teach:** Unsupervised anomaly detection — no labeled data needed.
+The model learns the pattern of normal and flags what does not fit.
+
+### Day 18 — Commercial Market Map
+**Utility relevance:** Vendor selection, procurement, capability gap analysis.
+**ML layer:** None. This is a structured reference document and portal module.
+**Generative AI layer:** AI-powered vendor matching. User describes their monitoring
+need in plain English. AI recommends which commercial provider fits and explains why.
+Covers: Planet, Capella Space, ICEYE, Maxar, GHGSat, Carbon Mapper.
+**Key concept to teach:** The commercial EO market — what each provider sees,
+what they charge, what AI they apply, when to use satellite vs aerial vs drone.
+
+### Day 19 — Capstone: Utility Intelligence Brief
+**Utility relevance:** Executive decision support. The room-stopper demo.
+**ML layer:** Pulls clustering output, anomaly flags, and subsidence zones from
+earlier modules. Real analytical results as inputs.
+**Generative AI layer:** Synthesises all findings into a structured one-page brief
+a utility executive can read in 3 minutes. Entire narrative output is AI-generated
+from real data inputs. This is the correct architecture: ML finds, AI explains.
+**Key concept to teach:** AI as a synthesis layer — not replacing analysis,
+but turning analysis into decisions.
+
+---
+
+## Progress Log
 
 - [x] Day 9: Change Detection portal module — NDVI difference map, three-layer Folium change overlay, AI interpretation
 - [x] Day 10: AI Imagery Interpreter portal module — Sentinel-2 chip to Gemini vision, structured interpretation
 - [x] Day 11: Shared map picker (map_picker.py) — all five modules; render clip fix in spectral_explorer.py
 - [x] Day 12: Emissions Explorer — TROPOMI CH4/NO2/CO/SO2 via GEE, 7-day composite, colorbar, AI interpretation
-- [ ] Day 13: Vegetation Encroachment Detection — NDVI threshold concept, right-of-way monitoring, electric T&D relevance
-- [ ] Day 14: Ground Movement and Subsidence — InSAR/Sentinel-1 coherence concept, pipeline and underground infrastructure
-- [ ] Day 15: LiDAR for Infrastructure — canopy height models, clearance distance, 3D point cloud basics, vegetation management
-- [ ] Day 16: Drone Imagery and AI Defect Detection — high-resolution inspection, computer vision defect classification, asset management
-- [ ] Day 17: Anomaly Detection — unsupervised ML on time series, flagging deviations without labeled data
-- [ ] Day 18: Commercial Market Map — Planet, Capella, ICEYE, Maxar, GHGSat, Carbon Mapper reference document
-- [ ] Day 19: Capstone — Utility Intelligence Brief, one integrated portal view for a utility audience
+- [ ] Day 13: Vegetation Encroachment Detection
+- [ ] Day 14: Ground Movement and Subsidence
+- [ ] Day 15: LiDAR for Infrastructure
+- [ ] Day 16: Drone Imagery and AI Defect Detection
+- [ ] Day 17: Anomaly Detection
+- [ ] Day 18: Commercial Market Map
+- [ ] Day 19: Capstone — Utility Intelligence Brief
 
 ---
 

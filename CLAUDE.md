@@ -62,6 +62,38 @@ under the hood. The app is the polished, interactive version of the same logic.
 This dual approach applies to every module in the program.
 Notebook days are for learning the mechanics. App days are for making the mechanics usable.
 
+---
+
+## AI Architecture — Two-Layer Rule (agreed Day 12, applies to all remaining modules)
+
+Every module from Day 13 onward must implement both layers. Neither layer alone is sufficient.
+
+**Layer 1 — ML / Algorithm layer**
+Classical machine learning or deep learning finds the pattern in the data.
+Examples: K-means clustering, Isolation Forest, PCA, DBSCAN, CNN classification.
+This layer does not describe. It computes. It finds structure the human eye cannot see
+at scale. It does not require labeled data where possible (prefer unsupervised methods).
+
+**Layer 2 — Generative AI layer**
+Groq or Gemini explains what the ML layer found.
+It interprets, contextualises, recommends action, and writes narrative output.
+It never substitutes for real analysis. It always receives structured inputs from Layer 1.
+
+**Why both layers.**
+Generative AI alone describes but does not find. ML alone finds but does not explain.
+Together they produce the correct architecture: find the pattern, explain what it means.
+This is how real production EO workflows operate in 2025–2026.
+
+**UI rule.**
+The two layers are visually distinct in every module.
+Users can see what the algorithm found and what the AI said about it separately.
+Never blend them into a single output block.
+
+**Option A constraint.**
+All modules are conceptual demonstrations. No real operational data required.
+Every module must be understandable to a non-specialist.
+Every module must be demonstrable in a 10-minute conversation.
+
 **Zero budget.** Every data source, API, library, and platform must be free.
 No OpenAI. No Anthropic API. No paid tiers.
 
@@ -102,6 +134,32 @@ No OpenAI. No Anthropic API. No paid tiers.
 - Google Colab: used for heavy model inference (foundation models)
 - Key: deploy .streamlit/config.toml must have headless=true
 
+**Deploy procedure — copy files to feedback repo, then push**
+
+Streamlit Cloud is configured with mainModule = apps/01_eo_explorer/app.py.
+It runs apps/01_eo_explorer/app.py in the feedback repo, NOT the repo root.
+Always copy to apps/01_eo_explorer/ — never to the repo root.
+
+```powershell
+# Copy the main app and any new module files
+Copy-Item "C:\Users\alnoo\OneDrive\Desktop\code\ai-earth-observation\apps\01_eo_explorer\app.py" `
+          "C:\Users\alnoo\OneDrive\Desktop\code\ai-earth-observation-feedback\apps\01_eo_explorer\app.py"
+
+# Example: copy a new shared component (adjust filename as needed)
+Copy-Item "C:\Users\alnoo\OneDrive\Desktop\code\ai-earth-observation\apps\01_eo_explorer\map_picker.py" `
+          "C:\Users\alnoo\OneDrive\Desktop\code\ai-earth-observation-feedback\apps\01_eo_explorer\map_picker.py"
+
+# Then push from the feedback folder
+cd C:\Users\alnoo\OneDrive\Desktop\code\ai-earth-observation-feedback
+git add .
+git commit -m "[day-XX] description"
+git push
+```
+
+**WARNING:** Do NOT copy to the repo root (ai-earth-observation-feedback\app.py).
+That file is not run by Streamlit Cloud. The correct destination is always
+ai-earth-observation-feedback\apps\01_eo_explorer\
+
 **App architecture: single portal**
 All modules live inside one Streamlit app with sidebar navigation.
 One URL, one deployment, one experience for users and clients.
@@ -109,14 +167,18 @@ Each module has its own files inside apps/01_eo_explorer/.
 The main app.py routes between modules via the sidebar.
 New modules are added per day as new files. The core app does not change.
 
-Current portal modules (app.py v1.6 — grows with each day):
+Current portal modules (app.py v1.7 — grows with each day):
   Module 0 — Welcome panel (default landing page)
   Module 1 — Spectral Explorer (Planetary Computer, optical imagery)
   Module 2 — Time Series Explorer (GEE, MODIS NDVI/EVI/LST/Burned Area, Landsat NDVI/NDWI)
   Module 3 — SAR Explorer (GEE, Sentinel-1 GRD, VV/VH/false color/change map)
   Module 4 — Change Detection (GEE, Sentinel-2/MODIS NDVI diff, three-layer change map)
-  Module 5 — AI Imagery Interpreter (Planetary Computer, Sentinel-2 true-color, 8-model vision chain)
-  Module 6 — EO Conversational Assistant (Day 13, planned)
+  Module 5 — AI Imagery Interpreter (Planetary Computer, Sentinel-2 true-color, 7-model vision chain)
+
+Shared components (apps/01_eo_explorer/):
+  map_picker.py — click-to-set-location map widget used by all five modules.
+                  render_map_picker(centre_bbox, picker_key, default_size_km) returns a bbox or None.
+                  clear_click(picker_key) resets click state when the user types a new location.
 
 Architecture rule: no standalone apps. Every new deliverable is a sidebar module
 added to apps/01_eo_explorer/app.py. New logic files go in apps/01_eo_explorer/.
@@ -520,6 +582,18 @@ Day 30  Gap Assessment
         Identify top three areas for a second 30-day cycle.
         Update README with program completion status.
         Output: gap assessment document, final repository state
+
+---
+
+## Architecture Reference
+
+A plain-English architecture guide is maintained at:
+docs/architecture/portal-architecture.md
+
+It covers: every file and what it does, all six modules (inputs/outputs/data sources),
+API keys required, what is free vs paid, the AI chains, the map picker, the deploy
+pipeline, and what the portal does not do. Read it when joining the project or
+briefing someone new.
 
 ---
 
