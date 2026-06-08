@@ -1,4 +1,4 @@
-﻿# PROJECT.md
+# PROJECT.md
 # AI-Native Earth Observation Innovation Lab
 # Current status and next steps
 # Update this file at the end of every session
@@ -7,293 +7,374 @@
 
 ## Current Status
 
-**Program day:** 12 complete
-**Phase:** Week 2 in progress
-**Last completed:** Day 12 — Emissions Explorer portal module. TROPOMI Sentinel-5P data via GEE for CH4, NO2, CO, SO2. 7-day composite mosaic. Point-sampling stats bypass. Folium map with scaled colorbar. AI interpretation via ai_chain. Colorbar labels fixed (display_scale per gas). Overlay opacity tuned to 0.55.
-**Next session:** Day 13 — Vegetation Encroachment Detection
+**Phase:** Arc-based program (revised after Day 12)
+**Last completed:** Arc 1 — Land Cover Intelligence. K-means clustering and Random Forest on Sentinel-2 via Planetary Computer. Notebook 06_land_cover_classification.ipynb complete. Portal module land_cover.py added (v1.9).
+**Next session:** Arc 2 — Corridor and Vegetation Risk
 
 ---
 
-## Completed: Day 11 — Shared Map Picker
+## Program Design
 
-- [x] map_picker.py created — shared component, ~160 lines
-- [x] render_map_picker(centre_bbox, picker_key, default_size_km) — single public function
-- [x] CartoDB Positron basemap (no API key needed)
-- [x] Auto zoom level from geocoded bbox width
-- [x] Size slider: 25 to 500 km, step 25
-- [x] Blue rectangle drawn on map showing exact analysis area
-- [x] CircleMarker at click centre point
-- [x] clear_click(picker_key) helper — called when user types a new location
-- [x] Wired into all five modules as expander: "📍 Refine location — click map to set exact area"
-- [x] Default sizes: Spectral 50 km, Time Series 100 km, SAR 50 km, Change Detection 100 km, Imagery 50 km
-- [x] Portal bumped to v1.7, deployed and confirmed clean startup
-- [x] Backlog item "Map picker for location (Option D)" cleared
-- [x] Render clip fix: _clip_to_bbox() helper added to spectral_explorer.py — local pixel crop using item.bbox so rendered images respect the map picker selection. PC Render API /preview always used; clip applied locally after fetch.
-- [x] _pad_to_ratio() helper added — prevents long/wide image on large radius selections by padding to 2:1 max aspect ratio
-- [x] _crop_to_valid() aspect ratio guard added — prevents thin-strip thumbnails when tile only marginally overlaps search area
+This program follows a learning arc structure. Each arc covers one analytical domain.
+No fixed day count. Each arc takes as long as the learning requires.
 
-## Completed: Day 10 — AI Imagery Interpreter
-
-- [x] imagery_interpreter.py created — 7-model vision chain (5 Gemini + 2 Groq Llama-4)
-- [x] fetch_chip(bbox, date_start, date_end) — searches user-set date range, picks best scene
-- [x] array_to_jpeg_bytes() — numpy to JPEG at quality 85
-- [x] interpret_image() — returns (text, model_name) tuple
-- [x] max_output_tokens=4096 for Gemini (thinking tokens reduce output budget)
-- [x] Date range inputs (start + end) — no hidden search window
-- [x] Area size guard: warn >25,000 km², block >100,000 km²
-- [x] Wired into app.py as sixth sidebar entry (v1.6)
-- [x] Confirmed working on Zanzibar, Tanzania
-
-## Completed: Day 9 — Change Detection Module
-
-- [x] gee_change.py created with GEE extraction and Folium map builder
-- [x] Module wired into app.py sidebar as fifth entry
-- [x] NDVI difference computed (Sentinel-2 with MODIS fallback)
-- [x] Three-layer change map: NDVI Date 1, NDVI Date 2, NDVI diff (default)
-- [x] 12 summary statistics: mean/std change, NDVI baselines, area gain/loss/stable, net change, gain/loss ratio, extreme gain/loss
-- [x] ai_chain.py created — 11-model fallback chain (6 Gemini + 5 Groq), session locking
-- [x] ArcGIS geocoder replaces Nominatim as primary — reliable on shared cloud IPs
-- [x] Grouped GEE reducer pattern — 2 round-trips instead of 5, STATS_SCALE 1000m
-- [x] AI interpretation returns (text, model_name) tuple; model shown below response
-- [x] Substantive fallback if all AI models unavailable
-- [x] gee_timeseries.py and gee_sar.py updated to use ai_chain
-- [x] notebooks/04_change_detection.ipynb committed
-- [x] Portal bumped to v1.5
-- [x] Confirmed working on Zanzibar, Tanzania and Sierra Nevada, California
+Every arc follows the same sequence:
+1. Notebook first. Understand the data, run the algorithm, see raw outputs cell by cell.
+2. Portal module second. Turn the notebook logic into an interactive sidebar module.
+3. Three layers always present in every module: data processing, AI algorithm, generative AI.
 
 ---
 
-## Deployed App URLs
+## Three-Layer Architecture
 
-Update this section as each app goes live.
+**Layer 1: Signal processing and data preparation.**
+Raw data cleaned, calibrated, and structured. Engineering, not AI.
 
-All modules are deployed as one portal app at https://eoil-explorer.streamlit.app
-Sidebar navigation routes between modules. One URL for everything.
-No standalone apps. Every deliverable is a new sidebar module in the portal.
+**Layer 2: AI algorithm layer.**
+The analytical intelligence. Finds the pattern. Clustering, classification,
+anomaly detection, segmentation, neural networks, foundation models.
+This is where real AI work happens. Generative AI never substitutes for this layer.
 
-| Module | Added Day | Status |
-|--------|-----------|--------|
-| Welcome Panel | 7 | Live |
-| Spectral Explorer | 3 | Live |
-| Time Series Explorer | 6 | Live |
-| SAR Explorer | 7 | Live |
-| Change Detection | 9 | Live |
-| AI Imagery Interpreter | 10 | Live |
-| Emissions Explorer | 12 | Live |
-| Vegetation Encroachment | 13 | Planned |
-| Ground Movement / Subsidence | 14 | Planned |
-| LiDAR for Infrastructure | 15 | Planned |
-| Drone Imagery and AI Defect Detection | 16 | Planned |
-| Anomaly Detection | 17 | Planned |
-| Commercial Market Map | 18 | Planned |
-| Capstone: Utility Intelligence Brief | 19 | Planned |
+**Layer 3: Generative AI layer.**
+Groq or Gemini interprets what Layer 2 found. Contextualises and recommends.
+Always receives structured inputs from Layer 2. Never invents the analysis.
+
+All three layers are visually distinct in every module UI.
+
+---
+
+## Portal Modules — Live
+
+All modules deployed at https://eoil-explorer.streamlit.app
+
+| Module | Added | Status |
+|--------|-------|--------|
+| Welcome Panel | Day 7 | Live |
+| Spectral Explorer | Day 3 | Live |
+| Time Series Explorer | Day 6 | Live |
+| SAR Explorer | Day 7 | Live |
+| Change Detection | Day 9 | Live |
+| AI Imagery Interpreter | Day 10 | Live |
+| Emissions Explorer | Day 12 | Live |
+| Land Cover Intelligence | Arc 1 | Live |
+
+---
+
+## Arc Plan
+
+### Arc 1 — Optical Intelligence and Land Cover
+
+**Goal:** Deep understanding of multispectral classification.
+Compare unsupervised and supervised approaches on the same scene.
+Introduce SAM as a foundation model for segmentation.
+
+**Data:** Sentinel-2 via Planetary Computer or GEE
+
+**Layer 2 algorithms:**
+- K-means clustering on NDVI and spectral bands
+- Random Forest classifier trained on labeled pixels
+- SAM (Segment Anything Model) for object segmentation
+- Compare all three outputs on the same scene
+
+**Layer 3:** Groq interprets classification map. Compares methods. Flags discrepancies.
+
+**Notebook:** Land cover classification — K-means vs Random Forest vs SAM
+**Portal module:** Land Cover Intelligence
+
+**Key concepts:**
+- Supervised vs unsupervised classification
+- What a foundation model is and how it differs from task-specific models
+- Why three methods on the same data teach more than one
+
+**Status:** Complete — notebook 06_land_cover_classification.ipynb, portal module land_cover.py, app.py v1.9. SAM reserved for Arc 5.
+
+---
+
+### Arc 2 — Corridor and Vegetation Risk
+
+**Goal:** Multi-algorithm vegetation encroachment analysis for utility corridors.
+Move beyond a snapshot to a growth trend and prioritised action output.
+
+**Data:** GEE multi-date Sentinel-2 NDVI
+
+**Layer 2 algorithms:**
+- K-means clustering for snapshot land cover classification
+- Threshold classification for comparison (rule-based vs learned)
+- Linear regression per pixel across 6 time steps for growth trend
+- Isolation Forest to flag anomalous growth zones
+
+**Layer 3:** Groq synthesises all three algorithm outputs into a prioritised
+risk table: critical, warning, monitor. Recommends inspection sequencing.
+
+**Notebook:** Vegetation encroachment — multi-algorithm corridor analysis
+**Portal module:** Corridor Risk Intelligence
+
+**Key concepts:**
+- Unsupervised clustering vs rule-based thresholding
+- Pixel-level trend analysis over time
+- Isolation Forest for anomaly detection without labeled data
+- How three algorithms on the same data produce a richer risk picture than one
+
+**Status:** Next to build
+
+---
+
+### Arc 3 — Radar and Ground Movement
+
+**Goal:** Understand SAR coherence and use it to detect ground movement.
+Introduce autoencoders as a neural network approach to anomaly detection.
+
+**Data:** Sentinel-1 GRD and SLC via ASF Data Search or GEE
+
+**Layer 2 algorithms:**
+- PCA on multi-date SAR coherence stack to find change dimensions
+- Autoencoder trained on baseline coherence to flag reconstruction errors
+- Statistical threshold comparison against autoencoder output
+
+**Layer 3:** Groq interprets coherence loss patterns. Identifies infrastructure
+risk zones. Explains what InSAR coherence measures and why it detects subsidence.
+
+**Notebook:** SAR coherence and ground movement — PCA and autoencoder approach
+**Portal module:** Ground Movement and Subsidence
+
+**Key concepts:**
+- What SAR coherence is and how it measures ground stability
+- PCA as a dimensionality reduction tool on multi-date stacks
+- What an autoencoder is: compress, reconstruct, flag what reconstructs poorly
+- Why neural network anomaly detection differs from statistical thresholding
+
+**Status:** Planned
+
+---
+
+### Arc 4 — LiDAR Intelligence
+
+**Goal:** Work with real 3D point cloud data. Derive canopy height, ground model,
+and clearance distances. Use AI for precision classification at the point level.
+
+**Data:** USGS 3DEP LiDAR via OpenTopography (real point cloud data, US coverage)
+
+**Layer 2 algorithms:**
+- DBSCAN clustering for individual tree crown delineation
+- Random Forest on point features (height, intensity, return number) for
+  ground vs vegetation vs structure classification
+- Height threshold for clearance distance calculation
+
+**Layer 3:** Groq interprets clearance violations by severity. Recommends
+inspection priority. Explains what LiDAR sees that satellites cannot.
+
+**Notebook:** LiDAR intelligence — point cloud processing and clearance analysis
+**Portal module:** LiDAR Clearance Intelligence
+
+**Key concepts:**
+- What LiDAR measures and how point clouds differ from raster imagery
+- DBSCAN: density-based clustering, arbitrary cluster shapes, noise handling
+- Feature engineering on point clouds: what features matter for classification
+- The resolution gap: satellite vs LiDAR vs drone
+
+**Status:** Planned
+
+---
+
+### Arc 5 — Foundation Models
+
+**Goal:** Understand what geospatial foundation models are, how they work,
+and when they outperform task-specific models.
+
+**Data:** Sentinel-2 HLS tiles (Harmonised Landsat Sentinel)
+
+**Layer 2 algorithms:**
+- Prithvi (IBM/NASA geospatial foundation model) for land cover and change detection
+- SAM for fine segmentation on the same scenes
+- Compare Prithvi output to K-means from Arc 1 on matching scenes
+
+**Layer 3:** Groq explains what the foundation model found. Compares to classical
+methods. Explains when to use a foundation model vs a task-specific classifier.
+
+**Notebook:** Geospatial foundation models — Prithvi and SAM applied to Sentinel-2
+**Portal module:** Foundation Model Explorer
+
+**Key concepts:**
+- What a foundation model is: pre-trained on massive data, fine-tunable for tasks
+- How Prithvi differs from a model trained on one task
+- Zero-shot vs fine-tuned performance
+- Compute requirements and when foundation models are worth the cost
+
+**Status:** Planned
+
+---
+
+### Arc 6 — Time Series and Anomaly Detection
+
+**Goal:** Compare three anomaly detection approaches on the same time series data.
+Understand when each method is appropriate and why they flag different events.
+
+**Data:** MODIS or Landsat long time series (10+ years) via GEE
+
+**Layer 2 algorithms:**
+- Isolation Forest: tree-based, no assumptions about distribution
+- Autoencoder on time series windows: learns seasonal pattern, flags deviations
+- LSTM: learns temporal dependencies, flags points that break the learned sequence
+
+**Layer 3:** Groq explains why each method flagged different points.
+Interprets the likely cause of each anomaly: drought, fire, land use change,
+sensor error. Recommends follow-up action per flagged event.
+
+**Notebook:** Time series anomaly detection — Isolation Forest vs Autoencoder vs LSTM
+**Portal module:** Time Series Anomaly Intelligence
+
+**Key concepts:**
+- Why three methods on the same series produce different results
+- What Isolation Forest assumes and where it fails
+- What an LSTM learns that a statistical method cannot
+- Distinguishing real anomalies from sensor artifacts
+
+**Status:** Planned
+
+---
+
+### Arc 7 — Hyperspectral Intelligence
+
+**Goal:** Work with real hyperspectral data. Understand spectral signatures.
+Use dimensionality reduction and clustering to identify materials and anomalies.
+
+**Data:** EMIT hyperspectral scenes via NASA Earthdata (free account required)
+
+**Layer 2 algorithms:**
+- PCA for dimensionality reduction across 285 bands to 10 components
+- K-means on PCA components for material clustering
+- Autoencoder for spectral unmixing and anomaly detection
+
+**Layer 3:** Groq interprets material classifications. Flags unusual spectral
+signatures. Explains what each material cluster likely represents and why
+hyperspectral data can identify things multispectral cannot.
+
+**Notebook:** Hyperspectral intelligence — EMIT data, PCA, clustering, unmixing
+**Portal module:** Hyperspectral Material Intelligence
+
+**Key concepts:**
+- The difference between multispectral (10-15 bands) and hyperspectral (200+ bands)
+- Why dimensionality reduction is necessary before applying ML to hyperspectral data
+- Spectral unmixing: a pixel is rarely one pure material
+- What EMIT measures and why it was deployed on the ISS
+
+**Status:** Planned
+
+---
+
+### Arc 8 — Atmospheric Intelligence
+
+**Goal:** Extend the existing Emissions Explorer with real anomaly detection
+and trend analysis. Move from a visualisation module to an analytical one.
+
+**Data:** TROPOMI via GEE (already integrated in Emissions Explorer)
+
+**Layer 2 algorithms:**
+- Isolation Forest on concentration time series per location
+- K-means on spatial emission patterns to identify emission clusters
+- Linear trend per pixel to flag rising vs falling concentrations
+
+**Layer 3:** Groq interprets anomalous concentration events. Suggests likely
+source types. Flags trend direction and rate of change per region.
+
+**Notebook:** Atmospheric anomaly detection — TROPOMI time series analysis
+**Portal module:** Upgrade existing Emissions Explorer to add anomaly and trend layers
+
+**Key concepts:**
+- Applying anomaly detection to atmospheric concentration data
+- Spatial clustering of emission sources
+- How TROPOMI detects methane and why the signal requires careful interpretation
+
+**Status:** Planned
+
+---
+
+### Arc 9 — Capstone: Utility Intelligence Brief
+
+**Goal:** Synthesise outputs from all arcs into one decision-ready brief.
+Demonstrate the full three-layer architecture operating end to end.
+
+**Inputs:** Real outputs from Arc 2 (vegetation risk), Arc 3 (ground movement),
+Arc 4 (LiDAR clearance), Arc 6 (time series anomalies), Arc 8 (atmospheric).
+
+**Layer 2:** Aggregates risk scores across layers. Weights by severity.
+Produces a structured risk summary as a data object, not a narrative.
+
+**Layer 3:** Groq receives the structured risk object and writes a one-page
+executive brief. Every claim in the brief is traceable to a Layer 2 output.
+
+**Portal module:** Utility Intelligence Brief
+
+**Key concepts:**
+- AI as a synthesis layer: ML finds, AI explains, humans decide
+- Why the brief is only as strong as the inputs feeding it
+- What a decision-ready output looks like vs a data display
+
+**Status:** Planned
 
 ---
 
 ## Completed Notebooks
 
-Update this section as each notebook is committed.
-
-| Notebook | Day | Status |
+| Notebook | Arc | Status |
 |----------|-----|--------|
-| 01_stac_query_demo.ipynb | 2 | pending |
-| 02_gee_ndvi_timeseries.ipynb | 4 | complete |
-| 03_sentinel1_sar_basics.ipynb | 5 | complete |
-| 04_change_detection.ipynb | 9 | complete |
-| 04_land_cover_classification.ipynb | 8 | pending |
-| 05_sam_segmentation_demo.ipynb | 11 | pending |
-| 06_prithvi_foundation_model.ipynb | 12 | pending |
-| 07_sar_infrastructure_monitoring.ipynb | 16 | pending |
-| 08_lidar_intelligence.ipynb | 18 | pending |
-| 09_emit_hyperspectral.ipynb | 19 | pending |
+| 02_gee_ndvi_timeseries.ipynb | Day 4 | Complete |
+| 03_sentinel1_sar_basics.ipynb | Day 5 | Complete |
+| 04_change_detection.ipynb | Day 9 | Complete |
+| 06_land_cover_classification.ipynb | Arc 1 | Complete |
 
 ---
 
 ## Requirements.txt Status
 
-Track which dependency groups are active.
-
-| Group | Days | Status |
-|-------|------|--------|
-| Core (streamlit, folium, groq, etc.) | Day 1+ | active |
-| Raster (rasterio, rioxarray, xarray, odc-stac) | Day 3 | commented out |
-| GEE (earthengine-api, geemap) | Day 4 | commented out |
-| SAM (segment-anything) | Day 11 | commented out |
-| LiDAR (laspy, open3d) | Day 18 | commented out |
-| Hyperspectral (netCDF4, h5py, spectral) | Day 19 | commented out |
+| Group | Status |
+|-------|--------|
+| Core (streamlit, folium, groq, etc.) | Active |
+| Raster (rasterio, rioxarray, xarray, odc-stac) | Commented out |
+| GEE (earthengine-api, geemap) | Commented out |
+| SAM (segment-anything) | Commented out — activate for Arc 1 and Arc 5 |
+| LiDAR (laspy, open3d) | Commented out — activate for Arc 4 |
+| Hyperspectral (netCDF4, h5py, spectral) | Commented out — activate for Arc 7 |
+| Deep learning (torch, scikit-learn) | Not yet added — activate for Arc 3 and Arc 6 |
 
 ---
 
 ## Blockers and Notes
 
-- GEE account: must be activated before Day 4. Request at earthengine.google.com
-- Groq API key: get at console.groq.com
-- Gemini API key: get at aistudio.google.com
-- Mapbox token: get at mapbox.com
-- GEE credentials: service account JSON stored in apps/01_eo_explorer/.streamlit/secrets.toml (local only, gitignored). For Streamlit Cloud deployment, add GEE_SERVICE_ACCOUNT_JSON to the app's secrets in the Streamlit Cloud dashboard.
+- GEE credentials: service account JSON in apps/01_eo_explorer/.streamlit/secrets.toml (local, gitignored)
+- Groq API key: console.groq.com
+- Gemini API key: aistudio.google.com
+- NASA Earthdata account: required for EMIT data in Arc 7. Register free at urs.earthdata.nasa.gov
+- ASF account: required for raw Sentinel-1 SLC data in Arc 3. Register free at search.asf.alaska.edu
+- OpenTopography: no account required for most USGS 3DEP datasets
 
 ---
 
-## Backlog — SAR Explorer improvements
+## Backlog — Carry Forward
 
-- Known bad geocodes: "Port of Rotterdam" resolves to an inland agricultural area. "Maasvlakte Rotterdam" or coordinates work correctly. The map picker (Day 11) now solves this — type the city, then click the exact port area on the map.
-
----
-
-## Backlog — Time Series Explorer improvements (carry into Day 7+)
-
-These were identified during Day 6 testing. Do not forget.
-
-**Additional indices to add to the Dataset dropdown:**
-- EVI (Enhanced Vegetation Index) — already in MODIS/061/MOD13Q1, same collection as NDVI. Just add a new entry to DATASETS dict in gee_timeseries.py. Easiest add.
-- NDWI (Normalized Difference Water Index) — requires Landsat band math (NIR minus SWIR divided by NIR plus SWIR). Measures water content and wetness.
-- Burned Area — MODIS MCD64A1 collection, pre-computed. Shows fire extent over time.
-- Plan: add EVI first (10 min), then NDWI and Burned Area in a later session.
-
-**Other Time Series improvements noted:**
-- The GIBS tile overlay on the old comparison maps was not rendering visibly. Replaced with Annual Comparison bar chart (done Day 6). No further action needed.
-- Consider adding a "What does this index measure?" tooltip or expander next to the dataset selector so users understand what they are looking at before running analysis.
+- SAR Explorer: "Port of Rotterdam" geocodes inland. Map picker solves this for manual use.
+- Time Series Explorer: EVI, NDWI, Burned Area added Day 8. Tooltip for index definitions still pending.
 
 ---
 
-## Day-by-Day Progress Log
+## Session Log
 
-Update the checkbox and add a one-line note after each day is complete.
-
-### Week 1: Orientation and Data Access
-
-- [ ] Day 1: EO Explorer v1.0
-- [ ] Day 2: STAC and cloud-native data notebook
-- [ ] Day 3: EO Explorer v1.1 with spectral index module
-- [x] Day 4: GEE NDVI time series notebook — Sahel 10-year NDVI, 253 data points, trend +0.0034/year
-- [x] Day 5: Sentinel-1 SAR basics notebook — Rotterdam port, VV/VH/false color, backscatter change map
-- [x] Day 6: GEE Time Series Explorer portal module — MODIS NDVI, LST; Annual Comparison chart; GEE credentials
-- [x] Day 7: SAR Explorer module — Sentinel-1 VV/VH/false color/change map; Welcome panel; bbox size warning
-- [x] Day 8: Week 1 primer doc; EVI, NDWI, Burned Area added to Time Series Explorer; Landsat performance warning
-
-### Revised Plan (agreed Day 12 session — updated after Day 12 review)
-
----
-
-## Guiding Principles for All Remaining Days
-
-**Option A throughout.** Conceptual demonstration, not deep implementation.
-No real operational data required. Every module must be understandable to a
-non-specialist and demonstrable in a 10-minute conversation.
-
-**Two-layer AI structure in every module.**
-Classical ML or deep learning finds the pattern.
-Generative AI (Groq/Gemini) explains what it means.
-These two layers are visually distinct in the UI.
-Never use generative AI alone as a substitute for real analysis.
-
-**The division of labor:**
-- ML/algorithms: clustering, classification, anomaly detection, segmentation, PCA
-- Generative AI: interpretation, explanation, recommended action, narrative output
-
-**Why this matters.**
-The world is moving to AI-native workflows. But generative AI alone is not enough.
-It describes. It does not find. Classical ML and deep learning find patterns in data.
-Generative AI explains what those patterns mean. Both together is the correct architecture.
-
----
-
-## Day-by-Day Plan (Days 13–19)
-
-### Day 13 — Vegetation Encroachment Detection
-**Utility relevance:** Electric transmission and distribution right-of-way monitoring.
-**ML layer:** K-means clustering on NDVI and spectral bands to segment land cover.
-Flag pixels that cross into the right-of-way buffer zone.
-**Generative AI layer:** Explains what each cluster represents. Describes encroachment
-risk level. Recommends action (immediate inspection vs scheduled maintenance).
-**Key concept to teach:** Unsupervised classification — the algorithm groups pixels
-by similarity without being told what to look for.
-
-### Day 14 — Ground Movement and Subsidence
-**Utility relevance:** Pipeline integrity, underground cable and conduit monitoring.
-**ML layer:** PCA on multi-date Sentinel-1 coherence stack to find change dimensions.
-Statistical threshold to flag subsidence zones.
-**Generative AI layer:** Interprets the coherence loss pattern. Explains infrastructure
-risk. Flags which asset types are most exposed.
-**Key concept to teach:** InSAR coherence — how radar phase difference detects
-millimetre-scale ground movement over time.
-
-### Day 15 — LiDAR for Infrastructure
-**Utility relevance:** Utility vegetation management, clearance distance compliance.
-**ML layer:** DBSCAN clustering to identify individual tree crowns from point cloud.
-Height threshold classification to flag clearance violations.
-**Generative AI layer:** Explains what clearance distances mean for T&D lines.
-Interprets risk zones. Recommends inspection priority by severity.
-**Key concept to teach:** What LiDAR sees that satellites cannot — vertical structure,
-canopy height, ground elevation beneath tree cover.
-
-### Day 16 — Drone Imagery and AI Defect Detection
-**Utility relevance:** Asset inspection, maintenance prioritisation, defect logging.
-**ML layer:** CNN transfer learning concept. Show how a pretrained model is fine-tuned
-on defect images. Visualise what the model responds to (activation maps concept).
-**Generative AI layer:** Classifies defect type and severity from image description.
-Recommends inspection priority. This is the module where deep learning and generative
-AI combine most naturally.
-**Key concept to teach:** The resolution gap — what satellites see vs what drones see.
-Transfer learning — reusing a model trained on one task for a related task.
-
-### Day 17 — Anomaly Detection
-**Utility relevance:** Operational monitoring without labeled training data.
-**ML layer:** Isolation Forest on NDVI or LST time series. Flags deviations without
-labeled anomalies. Z-score baseline for comparison. Show the algorithm learning
-what normal looks like.
-**Generative AI layer:** Explains why a flagged point is anomalous. Suggests likely
-cause — drought, fire, equipment failure, vegetation die-off. Recommends follow-up.
-**Key concept to teach:** Unsupervised anomaly detection — no labeled data needed.
-The model learns the pattern of normal and flags what does not fit.
-
-### Day 18 — Commercial Market Map
-**Utility relevance:** Vendor selection, procurement, capability gap analysis.
-**ML layer:** None. This is a structured reference document and portal module.
-**Generative AI layer:** AI-powered vendor matching. User describes their monitoring
-need in plain English. AI recommends which commercial provider fits and explains why.
-Covers: Planet, Capella Space, ICEYE, Maxar, GHGSat, Carbon Mapper.
-**Key concept to teach:** The commercial EO market — what each provider sees,
-what they charge, what AI they apply, when to use satellite vs aerial vs drone.
-
-### Day 19 — Capstone: Utility Intelligence Brief
-**Utility relevance:** Executive decision support. The room-stopper demo.
-**ML layer:** Pulls clustering output, anomaly flags, and subsidence zones from
-earlier modules. Real analytical results as inputs.
-**Generative AI layer:** Synthesises all findings into a structured one-page brief
-a utility executive can read in 3 minutes. Entire narrative output is AI-generated
-from real data inputs. This is the correct architecture: ML finds, AI explains.
-**Key concept to teach:** AI as a synthesis layer — not replacing analysis,
-but turning analysis into decisions.
-
----
-
-## Progress Log
-
-- [x] Day 9: Change Detection portal module — NDVI difference map, three-layer Folium change overlay, AI interpretation
-- [x] Day 10: AI Imagery Interpreter portal module — Sentinel-2 chip to Gemini vision, structured interpretation
-- [x] Day 11: Shared map picker (map_picker.py) — all five modules; render clip fix in spectral_explorer.py
-- [x] Day 12: Emissions Explorer — TROPOMI CH4/NO2/CO/SO2 via GEE, 7-day composite, colorbar, AI interpretation
-- [ ] Day 13: Vegetation Encroachment Detection
-- [ ] Day 14: Ground Movement and Subsidence
-- [ ] Day 15: LiDAR for Infrastructure
-- [ ] Day 16: Drone Imagery and AI Defect Detection
-- [ ] Day 17: Anomaly Detection
-- [ ] Day 18: Commercial Market Map
-- [ ] Day 19: Capstone — Utility Intelligence Brief
+- [x] Day 1-8: Portal foundation, spectral analysis, time series, SAR, change detection, week 1 primer
+- [x] Day 9: Change Detection portal module
+- [x] Day 10: AI Imagery Interpreter portal module
+- [x] Day 11: Shared map picker — map_picker.py, all five modules wired
+- [x] Day 12: Emissions Explorer — TROPOMI CH4/NO2/CO/SO2 via GEE
+- [x] Arc 1: Land Cover Intelligence — notebook + portal module complete (v1.9)
+- [ ] Arc 2: Corridor and Vegetation Risk — next session
 
 ---
 
 ## How to Update This File
 
-At the end of every session, update:
-1. Current Status section: change the day number and last completed item
-2. Today's Task section: replace with the next day's task and definition of done
-3. Deployed App URLs: add the Streamlit Cloud URL after each deployment
-4. Completed Notebooks: mark status as complete after each commit
-5. Requirements.txt Status: mark groups as active when uncommented
-6. Progress Log: check the completed day, add a one-line note
-
-Commit PROJECT.md with every session commit.
-
-
+At the end of every session:
+1. Update Current Status: last completed, next session
+2. Update the arc status field for the arc just completed
+3. Check off the session log entry
+4. Update Requirements.txt Status if any group was activated
+5. Add any new blockers or notes
+6. Commit PROJECT.md with every session commit
