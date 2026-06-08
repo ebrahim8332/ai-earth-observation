@@ -292,40 +292,58 @@ def render_contact_sheet(item, satellite_key: str,
     bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
     """
     sat     = satellite_catalog.SATELLITES[satellite_key]
+    bands   = sat["bands"]
     presets = sat["presets"]
     results = []
 
     for label, preset in presets.items():
+        r, g, b = preset["r"], preset["g"], preset["b"]
         arr = render_combination(
-            item,
-            preset["r"], preset["g"], preset["b"],
+            item, r, g, b,
             satellite_key,
             width=thumb_size,
             bbox=bbox,
         )
+        # Build short channel label: "R → B11 (SWIR 1)  ·  G → B08 (NIR)  ·  B → B04 (Red)"
+        def band_label(code):
+            info = bands.get(code, {})
+            name = info.get("name", code)
+            return f"{code} ({name})"
+
         results.append({
-            "label": label,
-            "note":  preset["note"],
-            "array": arr,
-            "type":  "preset",
+            "label":    label,
+            "note":     preset["note"],
+            "array":    arr,
+            "type":     "preset",
+            "channels": f"R → {band_label(r)}  ·  G → {band_label(g)}  ·  B → {band_label(b)}",
         })
 
     if include_ndvi and not sat.get("sar"):
         arr = render_ndvi(item, satellite_key, width=thumb_size, bbox=bbox)
+        if satellite_key == "Sentinel-2 L2A":
+            expr = "(B08 − B04) / (B08 + B04)"
+        else:
+            expr = "(NIR − Red) / (NIR + Red)"
         results.append({
-            "label": "NDVI",
-            "note":  "Vegetation health index. Green = healthy. Red = bare or stressed.",
-            "array": arr,
-            "type":  "index",
+            "label":    "NDVI",
+            "note":     "Vegetation health index. Green = healthy. Red = bare or stressed.",
+            "array":    arr,
+            "type":     "index",
+            "channels": f"Expression: {expr}",
         })
 
     if include_ndwi and not sat.get("sar"):
         arr = render_ndwi(item, satellite_key, width=thumb_size, bbox=bbox)
+        if satellite_key == "Sentinel-2 L2A":
+            expr = "(B03 − B08) / (B03 + B08)"
+        else:
+            expr = "(Green − NIR) / (Green + NIR)"
         results.append({
-            "label": "NDWI",
-            "note":  "Water body index. Bright blue = open water.",
-            "array": arr,
-            "type":  "index",
+            "label":    "NDWI",
+            "note":     "Water body index. Bright blue = open water.",
+            "array":    arr,
+            "type":     "index",
+            "channels": f"Expression: {expr}",
         })
 
     return results

@@ -1209,6 +1209,8 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                 with col:
                     st.image(result["array"], caption=result["label"], use_container_width=True)
                     st.caption(result["note"])
+                    if result.get("channels"):
+                        st.caption(f"📡 {result['channels']}")
 
     # Stop here — do not render the EO Explorer below
     st.stop()
