@@ -47,11 +47,13 @@ GAS_CONFIG = {
         ),
     },
     "Nitrogen Dioxide (NO2)": {
-        "collection": "COPERNICUS/S5P/OFFL/L3_NO2",
-        "band":       "NO2_column_number_density",
-        "unit":       "mol/m²",
-        "min_val":    0,
-        "max_val":    0.0002,
+        "collection":    "COPERNICUS/S5P/OFFL/L3_NO2",
+        "band":          "NO2_column_number_density",
+        "unit":          "mol/m²",
+        "min_val":       0,
+        "max_val":       0.0002,
+        "display_scale": 10000,
+        "display_unit":  "×10⁻⁴ mol/m²",
         "palette":    [
             "#ffffff", "#ffffcc", "#ffeda0", "#fed976", "#feb24c",
             "#fd8d3c", "#fc4e2a", "#e31a1c", "#bd0026", "#800026",
@@ -67,11 +69,13 @@ GAS_CONFIG = {
         ),
     },
     "Carbon Monoxide (CO)": {
-        "collection": "COPERNICUS/S5P/OFFL/L3_CO",
-        "band":       "CO_column_number_density",
-        "unit":       "mol/m²",
-        "min_val":    0.02,
-        "max_val":    0.05,
+        "collection":    "COPERNICUS/S5P/OFFL/L3_CO",
+        "band":          "CO_column_number_density",
+        "unit":          "mol/m²",
+        "min_val":       0.02,
+        "max_val":       0.05,
+        "display_scale": 1000,
+        "display_unit":  "mmol/m²",
         "palette":    [
             "#f7fbff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6",
             "#4292c6", "#2171b5", "#08519c", "#08306b",
@@ -87,11 +91,13 @@ GAS_CONFIG = {
         ),
     },
     "Sulfur Dioxide (SO2)": {
-        "collection": "COPERNICUS/S5P/OFFL/L3_SO2",
-        "band":       "SO2_column_number_density",
-        "unit":       "mol/m²",
-        "min_val":    0,
-        "max_val":    0.001,
+        "collection":    "COPERNICUS/S5P/OFFL/L3_SO2",
+        "band":          "SO2_column_number_density",
+        "unit":          "mol/m²",
+        "min_val":       0,
+        "max_val":       0.001,
+        "display_scale": 1000,
+        "display_unit":  "mmol/m²",
         "palette":    [
             "#ffffe5", "#f7fcb9", "#d9f0a3", "#addd8e", "#78c679",
             "#41ab5d", "#238443", "#006837", "#004529",
@@ -278,34 +284,24 @@ def build_emissions_map(image, gas_key, bbox, actual_date):
             opacity = 0.85,
         ).add_to(m)
 
-        # Colorbar legend with formatted tick labels.
-        # Small-value gases (NO2, CO, SO2) have 5+ decimal places that
-        # compress badly at default formatting. We generate 6 evenly-spaced
-        # ticks and format them based on the value magnitude.
-        vmin = cfg["min_val"]
-        vmax = cfg["max_val"]
-        n    = 6
-        ticks = [vmin + (vmax - vmin) * i / (n - 1) for i in range(n)]
-
-        magnitude = max(abs(vmin), abs(vmax))
-        if magnitude < 0.001:
-            # Scientific notation — e.g. 2.0e-04
-            tick_labels = [f"{v:.1e}" for v in ticks]
-        elif magnitude < 0.1:
-            # Three decimal places — e.g. 0.020
-            tick_labels = [f"{v:.3f}" for v in ticks]
-        elif magnitude > 100:
-            # Integers — e.g. 1900
-            tick_labels = [f"{v:.0f}" for v in ticks]
-        else:
-            tick_labels = [f"{v:.3f}" for v in ticks]
+        # Colorbar legend.
+        # Small-value gases (NO2, CO, SO2) have 5+ decimal places when
+        # displayed in mol/m². We scale them to a readable unit:
+        #   NO2  → ×10⁻⁴ mol/m²  (multiply by 10000: 0–0.0002 → 0–2.0)
+        #   CO   → mmol/m²        (multiply by 1000:  0.02–0.05 → 20–50)
+        #   SO2  → mmol/m²        (multiply by 1000:  0–0.001 → 0–1.0)
+        #   CH4  → ppb            (no scaling: 1860–1960)
+        # GEE vis_params use the original values — scaling is display-only.
+        scale        = cfg.get("display_scale", 1)
+        display_unit = cfg.get("display_unit",  cfg["unit"])
+        vmin_d = cfg["min_val"] * scale
+        vmax_d = cfg["max_val"] * scale
 
         colormap = cm.LinearColormap(
-            colors      = cfg["palette"],
-            vmin        = vmin,
-            vmax        = vmax,
-            caption     = f"{gas_key} ({cfg['unit']})",
-            tick_labels = tick_labels,
+            colors  = cfg["palette"],
+            vmin    = vmin_d,
+            vmax    = vmax_d,
+            caption = f"{gas_key} ({display_unit})",
         )
         colormap.width = 320
         colormap.add_to(m)
