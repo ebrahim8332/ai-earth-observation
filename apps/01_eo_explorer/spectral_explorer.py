@@ -133,15 +133,17 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
     - Crop to valid (non-black) region
 
     bbox: optional [min_lon, min_lat, max_lon, max_lat] clip window.
-    When provided, the full tile is fetched then clipped locally using
-    the item's known geographic extent. No undocumented API endpoints used.
+    When provided, the bbox is passed directly to the PC rendering API
+    which renders only the requested geographic window. This avoids all
+    tile-edge and nodata-border issues from local pixel clipping.
+    Falls back to local clip if the API does not accept the bbox param.
     """
     sat     = satellite_catalog.SATELLITES[satellite_key]
     rescale = sat["rescale"]
     gamma   = sat["color_formula"]
 
-    # Build the request parameters. Repeated keys require a list of tuples.
-    params = [
+    # Base parameters — shared by both bbox and full-tile paths.
+    base_params = [
         ("collection", sat["collection"]),
         ("item",       item.id),
         ("assets",     r_band),
@@ -153,60 +155,70 @@ def render_combination(item, r_band: str, g_band: str, b_band: str,
         ("rescale",    rescale),
         ("rescale",    rescale),
         ("rescale",    rescale),
-        ("width",      str(width)),
-        ("height",     str(width)),
     ]
-
     if gamma:
-        params.append(("color_formula", gamma))
+        base_params.append(("color_formula", gamma))
 
     try:
-        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
-        if resp.status_code != 200:
-            return None
-
-        img = Image.open(BytesIO(resp.content)).convert("RGB")
-        arr = np.array(img)
-
         if bbox:
-            # Clip locally: use the item's known geographic extent to compute
-            # which pixel rows and columns correspond to the desired bbox.
-            # This avoids relying on any undocumented API crop endpoint.
-            clipped = _clip_to_bbox(arr, item.bbox, bbox)
+            # --- Server-side bbox crop (preferred path) ---
+            # Pass the bbox directly to the PC/titiler rendering API.
+            # The server renders only the requested geographic window,
+            # which avoids tile-edge geometry and nodata-border issues.
+            #
+            # Adjust height to match the real-world aspect ratio of the
+            # bbox, correcting for longitude compression at higher latitudes.
+            lon_span = bbox[2] - bbox[0]
+            lat_span = bbox[3] - bbox[1]
+            lat_mid  = (bbox[1] + bbox[3]) / 2.0
+            lon_km   = lon_span * 111.0 * float(np.cos(np.radians(lat_mid)))
+            lat_km   = lat_span * 111.0
+            ratio    = lat_km / lon_km if lon_km > 0 else 1.0
+            ratio    = min(max(ratio, 0.33), 3.0)   # cap to reasonable range
+            h        = int(width * ratio)
 
-            # Remove nodata borders from within the clipped region.
-            # The tile footprint is a diagonal parallelogram — parts of the
-            # selected bbox may fall outside it, leaving black nodata strips.
+            api_params = base_params + [
+                ("width",  str(width)),
+                ("height", str(h)),
+                ("bbox",   f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"),
+            ]
+
+            resp = requests.get(PC_RENDER_URL, params=api_params, timeout=60)
+            if resp.status_code == 200:
+                arr = np.array(Image.open(BytesIO(resp.content)).convert("RGB"))
+                # Light clean-up: remove any residual nodata pixels at the edges.
+                return _crop_to_valid(arr)
+
+            # API didn't accept bbox — fall back to local clip below.
+            params = base_params + [("width", str(width)), ("height", str(width))]
+            resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+            if resp.status_code != 200:
+                return None
+
+            arr     = np.array(Image.open(BytesIO(resp.content)).convert("RGB"))
+            clipped = _clip_to_bbox(arr, item.bbox, bbox)
             cropped = _crop_to_valid(clipped, skip_ratio_guard=True)
 
-            # Decide whether the clip is usable:
-            #   - ≥40% of the clipped area must be valid (non-black) pixels
-            #   - the cropped shape must not be a thin strip (≤3:1 ratio)
-            # If either condition fails the tile doesn't cover this location
-            # well. Fall back to the full-tile view so the user always gets
-            # a useful, properly-shaped image.
-            clip_pixels  = clipped.shape[0] * clipped.shape[1]
-            crop_pixels  = cropped.shape[0] * cropped.shape[1]
-            ch, cw       = cropped.shape[:2]
-            crop_ratio   = max(ch / cw, cw / ch) if ch > 0 and cw > 0 else 99
+            clip_pixels = clipped.shape[0] * clipped.shape[1]
+            crop_pixels = cropped.shape[0] * cropped.shape[1]
+            ch, cw      = cropped.shape[:2]
+            crop_ratio  = max(ch / cw, cw / ch) if ch > 0 and cw > 0 else 99
 
             good_clip = (
                 clip_pixels > 0
                 and (crop_pixels / clip_pixels) >= 0.40
                 and crop_ratio <= 3.0
             )
+            return cropped if good_clip else _crop_to_valid(arr)
 
-            if good_clip:
-                arr = cropped
-            else:
-                # Scene doesn't cover the selected area well enough.
-                # Show the full tile so the user still gets a useful image.
-                arr = _crop_to_valid(arr)
         else:
-            # Remove black nodata borders from full-tile renders.
-            arr = _crop_to_valid(arr)
-
-        return arr
+            # --- Full-tile path (no bbox) ---
+            params = base_params + [("width", str(width)), ("height", str(width))]
+            resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+            if resp.status_code != 200:
+                return None
+            arr = np.array(Image.open(BytesIO(resp.content)).convert("RGB"))
+            return _crop_to_valid(arr)
 
     except Exception:
         return None
