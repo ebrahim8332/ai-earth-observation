@@ -1210,14 +1210,6 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     st.image(result["array"], caption=result["label"], use_container_width=True)
                     st.caption(result["note"])
 
-        st.divider()
-        render_what_am_i_looking_at(
-            c_info["sat_key"], r_band, g_band, b_band,
-            preset_name="",
-            location_label=c_info["location_label"],
-            is_contact_sheet=True,
-        )
-
     # Stop here — do not render the EO Explorer below
     st.stop()
 
