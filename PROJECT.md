@@ -7,10 +7,10 @@
 
 ## Current Status
 
-**Program day:** 11 complete
+**Program day:** 12 complete
 **Phase:** Week 2 in progress
-**Last completed:** Shared map picker (map_picker.py) added to all five portal modules. v1.7 deployed. User can type a place name, then click the map to set an exact analysis bbox with a size slider (25-500 km). Eliminates geocoding ambiguity for specific features. Text geocoding stays as primary.
-**Next session:** Day 12 — TBD
+**Last completed:** Day 12 — Emissions Explorer portal module. TROPOMI Sentinel-5P data via GEE for CH4, NO2, CO, SO2. 7-day composite mosaic. Point-sampling stats bypass. Folium map with scaled colorbar. AI interpretation via ai_chain. Colorbar labels fixed (display_scale per gas). Overlay opacity tuned to 0.55.
+**Next session:** Day 13 — Vegetation Encroachment Detection
 
 ---
 
@@ -29,6 +29,8 @@
 - [x] Portal bumped to v1.7, deployed and confirmed clean startup
 - [x] Backlog item "Map picker for location (Option D)" cleared
 - [x] Render clip fix: _clip_to_bbox() helper added to spectral_explorer.py — local pixel crop using item.bbox so rendered images respect the map picker selection. PC Render API /preview always used; clip applied locally after fetch.
+- [x] _pad_to_ratio() helper added — prevents long/wide image on large radius selections by padding to 2:1 max aspect ratio
+- [x] _crop_to_valid() aspect ratio guard added — prevents thin-strip thumbnails when tile only marginally overlaps search area
 
 ## Completed: Day 10 — AI Imagery Interpreter
 
@@ -77,13 +79,14 @@ No standalone apps. Every deliverable is a new sidebar module in the portal.
 | SAR Explorer | 7 | Live |
 | Change Detection | 9 | Live |
 | AI Imagery Interpreter | 10 | Live |
-| EO Conversational Assistant | 13 | Planned |
-| Environmental Intelligence | 15 | Planned |
-| Atmospheric Intelligence | 17 | Planned |
-| Multi-Layer Geospatial | 20 | Planned |
-| Decision Support Platform | 24 | Planned |
-| EO Vendor Evaluator | 26 | Planned |
-| EOIL Curriculum Index | 28 | Planned |
+| Emissions Explorer | 12 | Live |
+| Vegetation Encroachment | 13 | Planned |
+| Ground Movement / Subsidence | 14 | Planned |
+| LiDAR for Infrastructure | 15 | Planned |
+| Drone Imagery and AI Defect Detection | 16 | Planned |
+| Anomaly Detection | 17 | Planned |
+| Commercial Market Map | 18 | Planned |
+| Capstone: Utility Intelligence Brief | 19 | Planned |
 
 ---
 
@@ -168,36 +171,24 @@ Update the checkbox and add a one-line note after each day is complete.
 - [x] Day 7: SAR Explorer module — Sentinel-1 VV/VH/false color/change map; Welcome panel; bbox size warning
 - [x] Day 8: Week 1 primer doc; EVI, NDWI, Burned Area added to Time Series Explorer; Landsat performance warning
 
-### Week 2: Core Analysis and AI Integration
+### Revised Plan (agreed Day 12 session)
 
-- [x] Day 9: Change Detection portal module — NDVI difference map, three-layer Folium change overlay, AI interpretation with fallback; notebook committed
+**Guiding principle:** Option A throughout. Conceptual demonstration, not deep implementation.
+No real operational data required. Every module must be understandable to a non-specialist
+and demonstrable in a 10-minute conversation. AI present in every module — extracting meaning,
+flagging anomalies, or explaining what an algorithm found.
+
+- [x] Day 9: Change Detection portal module — NDVI difference map, three-layer Folium change overlay, AI interpretation
 - [x] Day 10: AI Imagery Interpreter portal module — Sentinel-2 chip to Gemini vision, structured interpretation
-- [x] Day 11: Shared map picker (map_picker.py) — all five modules; render clip fix (_clip_to_bbox) in spectral_explorer.py
-- [ ] Day 12: Prithvi foundation model notebook (Colab)
-- [ ] Day 13: EO Conversational Assistant portal module — Groq chat with EO context
-- [ ] Day 14: Week 2 review and AI-applied-to-EO document
-
-### Week 3: Specialized Domains
-
-- [ ] Day 15: Environmental Intelligence portal module
-- [ ] Day 16: SAR infrastructure monitoring notebook
-- [ ] Day 17: Atmospheric Intelligence portal module
-- [ ] Day 18: LiDAR intelligence notebook
-- [ ] Day 19: EMIT hyperspectral notebook
-- [ ] Day 20: Multi-Layer Geospatial portal module
-- [ ] Day 21: Week 3 review and four domain briefs
-
-### Week 4: Capstone Integration
-
-- [ ] Day 22: Decision Support Platform — Panel 1 portal module
-- [ ] Day 23: Decision Support Platform — Panel 2 added
-- [ ] Day 24: Decision Support Platform — Panel 3 complete
-- [ ] Day 25: EO Vendor Evaluator data layer
-- [ ] Day 26: EO Vendor Evaluator portal module
-- [ ] Day 27: Curriculum Index repository cleanup
-- [ ] Day 28: EOIL Curriculum Index portal module
-- [ ] Day 29: Conference presentation outline
-- [ ] Day 30: Gap assessment and cycle 2 planning
+- [x] Day 11: Shared map picker (map_picker.py) — all five modules; render clip fix in spectral_explorer.py
+- [x] Day 12: Emissions Explorer — TROPOMI CH4/NO2/CO/SO2 via GEE, 7-day composite, colorbar, AI interpretation
+- [ ] Day 13: Vegetation Encroachment Detection — NDVI threshold concept, right-of-way monitoring, electric T&D relevance
+- [ ] Day 14: Ground Movement and Subsidence — InSAR/Sentinel-1 coherence concept, pipeline and underground infrastructure
+- [ ] Day 15: LiDAR for Infrastructure — canopy height models, clearance distance, 3D point cloud basics, vegetation management
+- [ ] Day 16: Drone Imagery and AI Defect Detection — high-resolution inspection, computer vision defect classification, asset management
+- [ ] Day 17: Anomaly Detection — unsupervised ML on time series, flagging deviations without labeled data
+- [ ] Day 18: Commercial Market Map — Planet, Capella, ICEYE, Maxar, GHGSat, Carbon Mapper reference document
+- [ ] Day 19: Capstone — Utility Intelligence Brief, one integrated portal view for a utility audience
 
 ---
 
