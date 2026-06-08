@@ -11,6 +11,7 @@ v1.4  Day 7:  SAR Explorer added; EO Explorer replaced with Welcome panel
 v1.5  Day 9:  Change Detection module added (fifth sidebar entry)
 v1.6  Day 10: AI Imagery Interpreter added (sixth sidebar entry)
 v1.7  Day 11: Shared map picker added to all five modules; aspect ratio fix for contact sheet and large radius renders
+v1.8  Day 12: Emissions Explorer added (TROPOMI CH4/NO2/CO/SO2 via GEE)
 """
 
 import streamlit as st
@@ -31,6 +32,7 @@ import gee_sar
 import gee_change
 import imagery_interpreter
 import map_picker
+import methane_explorer
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -66,7 +68,7 @@ with st.sidebar:
     st.markdown("### Module")
     selected_module = st.radio(
         "Navigate",
-        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer"],
+        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer", "🌫️ Emissions Explorer"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -2270,6 +2272,276 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
     st.stop()
 
 # ---------------------------------------------------------------------------
+# MODULE 6 — Emissions Explorer (TROPOMI Sentinel-5P atmospheric gases)
+# ---------------------------------------------------------------------------
+
+if selected_module == "🌫️ Emissions Explorer":
+
+    from datetime import date as _date
+
+    gee_available = st.session_state.gee_available
+
+    st.subheader("🌫️ Emissions Explorer")
+    st.caption(
+        "Select a location, gas, and date. "
+        "The module fetches TROPOMI satellite data and maps atmospheric concentration "
+        "with an AI interpretation for utility and industrial operators."
+    )
+
+    with st.expander("ℹ️ What does this module do?", expanded=False):
+        st.markdown("""
+**This module answers the question: what is the atmospheric concentration of industrial gases over this region?**
+
+It fetches data from the TROPOMI instrument aboard the Copernicus Sentinel-5P satellite.
+TROPOMI measures trace gas concentrations across the full globe every day.
+
+**Four gases are available:**
+
+| Gas | What it reveals |
+|---|---|
+| Methane (CH4) | Pipeline leaks, LNG facilities, coal mines, landfill emissions |
+| Nitrogen Dioxide (NO2) | Power plant combustion, vehicle fleets, industrial processes |
+| Carbon Monoxide (CO) | Wildfire plumes, industrial combustion, emergency response |
+| Sulfur Dioxide (SO2) | Coal plant stacks, industrial sites, volcanic degassing |
+
+**What you will see after running an analysis:**
+
+- **Regional average concentration** — the area-mean value for your selected date
+- **Interactive concentration map** — TROPOMI tile layer showing spatial variation across the region
+- **AI interpretation** — four-section analysis: pattern, source attribution, regulatory context, and utility action
+
+**How to use it:**
+
+1. Type any region or industrial area in the location box
+2. Select the gas you want to analyse
+3. Pick a target date (the module searches a 5-day window if that date has no data)
+4. Click Run Analysis
+
+**Data source:** Copernicus Sentinel-5P TROPOMI via Google Earth Engine (ESA / EU).
+Data is available from 2018 onwards. The effective spatial resolution is approximately
+5.5 km × 7 km per TROPOMI pixel, with global daily coverage.
+        """)
+
+    # --- Controls ---
+    col_loc, col_gas = st.columns([3, 1])
+
+    with col_loc:
+        em_place = st.text_input(
+            "Location — type any industrial region, basin, or city",
+            placeholder="e.g. Permian Basin, Texas   |   Ruhr Valley, Germany   |   Shanxi Province, China",
+            key="em_place",
+        )
+
+    with col_gas:
+        em_gas = st.selectbox(
+            "Gas",
+            list(methane_explorer.GAS_CONFIG.keys()),
+            key="em_gas",
+        )
+
+    col_date, _, col_run = st.columns([2, 2, 1])
+
+    with col_date:
+        em_date = st.date_input(
+            "Target date",
+            value=_date.today() - timedelta(days=30),
+            min_value=_date(2018, 5, 1),
+            max_value=_date.today() - timedelta(days=3),
+            key="em_date",
+        )
+
+    with col_run:
+        em_run_btn = st.button(
+            "▶ Run Analysis", type="primary",
+            use_container_width=True, key="em_run",
+        )
+
+    # --- Geocode ---
+    em_bbox        = None
+    em_region_name = ""
+
+    if em_place.strip():
+        cached_place = st.session_state.get("em_geocoded_place", "")
+        cached_bbox  = st.session_state.get("em_geocoded_bbox",  None)
+
+        if em_place.strip() != cached_place:
+            map_picker.clear_click("em")
+            with st.spinner(f"Looking up '{em_place}'..."):
+                result_bbox = geocoder.geocode_place(em_place)
+            if result_bbox:
+                st.session_state.em_geocoded_place = em_place.strip()
+                st.session_state.em_geocoded_bbox  = result_bbox
+                cached_bbox = result_bbox
+            else:
+                st.session_state.em_geocoded_place = ""
+                st.session_state.em_geocoded_bbox  = None
+                cached_bbox = None
+                st.error(f"Could not find '{em_place}'. Try a broader name.")
+
+        if cached_bbox:
+            em_bbox        = cached_bbox
+            em_region_name = em_place.strip()
+            st.caption(f"📍 {em_region_name}")
+
+    # Map picker — optional refinement
+    if em_bbox:
+        with st.expander("📍 Refine location — click map to set exact area", expanded=False):
+            picked = map_picker.render_map_picker(
+                centre_bbox     = em_bbox,
+                picker_key      = "em",
+                default_size_km = 200,
+            )
+            if picked:
+                em_bbox = picked
+
+    # GEE status
+    if gee_available:
+        st.caption("🟢 GEE connected — live TROPOMI data active.")
+    else:
+        st.caption("🔴 GEE not connected. Emissions Explorer requires live GEE data.")
+
+    st.divider()
+
+    # --- Session state ---
+    for _k, _v in [
+        ("em_map",            None), ("em_mean_val",       None),
+        ("em_actual_date",    None), ("em_pass_count",     None),
+        ("em_result_region",  None), ("em_result_gas",     None),
+        ("em_ai_result",      None), ("em_ai_model",       None),
+    ]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
+
+    # --- Two-step run pattern ---
+    if em_run_btn:
+        if not em_bbox:
+            st.warning("Enter a location first.")
+        elif not gee_available:
+            st.error("Emissions Explorer requires GEE credentials. Add GEE_SERVICE_ACCOUNT_JSON to Streamlit secrets.")
+        else:
+            st.session_state.em_map         = None
+            st.session_state.em_mean_val    = None
+            st.session_state.em_ai_result   = None
+            st.session_state.em_pending_run = {
+                "bbox":   em_bbox,
+                "gas":    em_gas,
+                "date":   str(em_date),
+                "region": em_region_name,
+            }
+            st.rerun()
+
+    if st.session_state.get("em_pending_run"):
+        p = st.session_state.em_pending_run
+        st.session_state.em_pending_run = None
+
+        cfg      = methane_explorer.GAS_CONFIG[p["gas"]]
+        band     = cfg["band"]
+
+        with st.spinner(f"Fetching TROPOMI {p['gas']} data for {p['region']}..."):
+            image, actual_date, pass_count = methane_explorer.fetch_tropomi_mosaic(
+                p["gas"], p["bbox"], p["date"]
+            )
+
+        if image is None:
+            st.error(
+                f"No TROPOMI data found for {p['gas']} near {p['date']}. "
+                "Try a different date or a wider search window."
+            )
+        else:
+            with st.spinner("Computing regional statistics..."):
+                mean_val = methane_explorer.get_regional_mean(image, p["bbox"], band)
+
+            with st.spinner("Building emissions map (20-40 seconds)..."):
+                em_map = methane_explorer.build_emissions_map(
+                    image, p["gas"], p["bbox"], actual_date
+                )
+
+            st.session_state.em_map          = em_map
+            st.session_state.em_mean_val     = mean_val
+            st.session_state.em_actual_date  = actual_date
+            st.session_state.em_pass_count   = pass_count
+            st.session_state.em_result_region = p["region"]
+            st.session_state.em_result_gas    = p["gas"]
+            st.success(
+                f"Data loaded — {p['gas']} over {p['region']} "
+                f"(7-day window: {actual_date}, {pass_count} orbital passes)."
+            )
+
+    # --- Display results ---
+    if st.session_state.em_map is not None:
+        cfg        = methane_explorer.GAS_CONFIG[st.session_state.em_result_gas]
+        mean_val   = st.session_state.em_mean_val
+        actual_date= st.session_state.em_actual_date
+        pass_count = st.session_state.em_pass_count
+        r_reg      = st.session_state.em_result_region
+        r_gas      = st.session_state.em_result_gas
+
+        def em_section_break():
+            st.markdown(
+                '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 28px 0 20px 0;">',
+                unsafe_allow_html=True,
+            )
+
+        # --- SECTION 1: Summary metric ---
+        st.subheader("📊 Regional Concentration")
+        c1, c2, c3 = st.columns(3)
+
+        val_display = f"{mean_val:.4f}" if mean_val is not None else "No valid pixels"
+        c1.metric(f"Regional average ({cfg['unit']})", val_display)
+        c2.metric("Period (7-day composite)", actual_date)
+        c3.metric("Orbital passes in window", pass_count)
+
+        st.caption(cfg["description"])
+
+        em_section_break()
+
+        # --- SECTION 2: Emissions map ---
+        st.subheader("🗺️ Concentration Map")
+        st.caption(
+            "Colour scale runs from low (cool) to high (warm). "
+            "Use the layer control in the top-right corner to toggle the gas layer. "
+            "Zoom in to see spatial variation within the region."
+        )
+
+        if st.session_state.em_map is not None:
+            from streamlit_folium import st_folium as _st_folium
+            _st_folium(st.session_state.em_map, width=700, height=500, returned_objects=[])
+        else:
+            st.warning("Map could not be built. Check GEE connection.")
+
+        em_section_break()
+
+        # --- SECTION 3: AI Interpretation ---
+        st.subheader("🤖 AI Interpretation")
+        if st.button("Get AI Interpretation", type="primary", key="em_ai_btn"):
+            with st.spinner("Thinking..."):
+                interpretation, model_used = methane_explorer.get_emissions_interpretation(
+                    r_gas, mean_val, r_reg, actual_date,
+                    groq_key=config.GROQ_API_KEY,
+                    gemini_key=config.GEMINI_API_KEY,
+                )
+                st.session_state.em_ai_result = interpretation
+                st.session_state.em_ai_model  = model_used
+
+        if st.session_state.get("em_ai_result"):
+            st.markdown(st.session_state.em_ai_result)
+            model_used = st.session_state.get("em_ai_model")
+            if model_used:
+                st.caption(f"AI response from **{model_used}**")
+            else:
+                st.caption("Showing built-in interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
+
+    else:
+        st.markdown("---")
+        st.markdown(
+            "**Type a location above, select a gas, pick a date, then click Run Analysis.**\n\n"
+            "The module will fetch live TROPOMI data and show an interactive concentration map "
+            "alongside a regional average and an AI interpretation."
+        )
+
+    st.stop()
+
+# ---------------------------------------------------------------------------
 # MODULE 0 — Welcome panel (default when Welcome is selected)
 # ---------------------------------------------------------------------------
 
@@ -2377,7 +2649,7 @@ with col_b:
 
 st.divider()
 st.caption(
-    "EOIL Portal v1.8 — Earth Observation Innovation Lab. "
+    "EOIL Portal v1.8 — Earth Observation Innovation Lab. Modules: Spectral, Time Series, SAR, Change Detection, AI Imagery Interpreter, Emissions Explorer. "
     "Built with Claude Code. "
     "Login and access controls will be added in a future version."
 )
