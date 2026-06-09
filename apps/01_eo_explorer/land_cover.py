@@ -728,6 +728,24 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
             if picked:
                 lc_bbox = picked
 
+    # Show bbox size so the user knows what area will be analysed
+    if lc_bbox:
+        lon_span = lc_bbox[2] - lc_bbox[0]
+        lat_span = lc_bbox[3] - lc_bbox[1]
+        import math
+        mid_lat  = (lc_bbox[1] + lc_bbox[3]) / 2
+        width_km = round(lon_span * 111.0 * math.cos(math.radians(mid_lat)))
+        height_km= round(lat_span * 111.0)
+        if width_km > 150 or height_km > 150:
+            st.warning(
+                f"⚠️ The geocoded area is **{width_km} × {height_km} km** — too large for a single "
+                f"Sentinel-2 tile. This will produce black or grey NoData areas in the output. "
+                f"Open **Refine location** above, click the map to centre a 100 km box on the "
+                f"agricultural area you want to classify, then run again."
+            )
+        else:
+            st.caption(f"📍 Analysis area: {width_km} × {height_km} km")
+
     # --- Run ---
     if run_btn:
         if not lc_bbox:
@@ -738,10 +756,8 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
             st.session_state.lc_kmeans   = None
             st.session_state.lc_rf       = None
             st.session_state.lc_ai       = None
-            # TEMP DEBUG: use exact notebook bbox to compare results
-            _debug_bbox = [30.0, 30.2, 31.8, 31.3]
             st.session_state.lc_pending  = {
-                "bbox":       _debug_bbox,
+                "bbox":       lc_bbox,
                 "date_range": date_range,
                 "max_cloud":  lc_max_cloud,
                 "n_clusters": n_clusters,
