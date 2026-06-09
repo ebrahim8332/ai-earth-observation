@@ -38,6 +38,29 @@ from sklearn.preprocessing import StandardScaler
 PC_RENDER_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item/preview"
 PC_STAC_URL   = "https://planetarycomputer.microsoft.com/api/stac/v1"
 
+
+# ---------------------------------------------------------------------------
+# Retry helper
+# ---------------------------------------------------------------------------
+
+def _pc_search_with_retry(search, retries=3, delay=5):
+    """
+    Call list(search.items()) with up to `retries` attempts.
+    Planetary Computer occasionally returns a timeout on the free tier.
+    Waiting `delay` seconds between attempts clears most transient errors.
+    Raises the last exception if all attempts fail.
+    """
+    import time
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            return list(search.items())
+        except Exception as e:
+            last_exc = e
+            if attempt < retries:
+                time.sleep(delay)
+    raise last_exc
+
 BANDS = ["B02", "B03", "B04", "B08", "B11"]
 
 # Land cover color scheme — shared by K-means and Random Forest displays
@@ -181,7 +204,7 @@ def search_scenes(bbox, date_range, max_cloud=10):
             datetime=date_range,
             query={"eo:cloud_cover": {"lt": max_cloud}},
         )
-        items = list(search.items())
+        items = _pc_search_with_retry(search)
         if not items:
             return [], "No scenes found. Try widening the date range or increasing max cloud %."
 
@@ -218,7 +241,7 @@ def fetch_scene(bbox, item_id, max_cloud=10):
             collections=["sentinel-2-l2a"],
             ids=[item_id],
         )
-        items = list(search.items())
+        items = _pc_search_with_retry(search)
         if not items:
             return None, f"Could not retrieve scene {item_id}."
 

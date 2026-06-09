@@ -41,6 +41,25 @@ PC_RENDER_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item/previe
 # STAC search
 # ---------------------------------------------------------------------------
 
+def _pc_search_with_retry(search, retries=3, delay=5):
+    """
+    Call list(search.items()) with up to `retries` attempts.
+    Planetary Computer occasionally returns a timeout on the free tier.
+    Waiting `delay` seconds between attempts clears most transient errors.
+    Raises the last exception if all attempts fail.
+    """
+    import time
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            return list(search.items())
+        except Exception as e:
+            last_exc = e
+            if attempt < retries:
+                time.sleep(delay)
+    raise last_exc
+
+
 def get_catalog():
     """
     Open and return a signed connection to the Planetary Computer STAC catalog.
@@ -67,7 +86,7 @@ def search_scenes(catalog, collection: str, bbox: list, date_range: str,
         query=query if query else None,
     )
 
-    items = list(search.items())
+    items = _pc_search_with_retry(search)
 
     # Sort by cloud cover if available, else by date
     if cloud_field:
