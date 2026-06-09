@@ -139,24 +139,21 @@ KM_COLORS       = ['#d4b483', '#ffffb3', '#a6d96a', '#1a9850']
 def _init_gee():
     """Return an initialised GEE ee module, or None on failure.
 
-    app.py calls gee_timeseries.init_gee() on startup, which runs ee.Initialize().
-    If GEE is already initialised when this function runs, skip the init call —
-    calling ee.Initialize() twice raises an exception that would otherwise make
-    this function return None and incorrectly report that GEE is unavailable.
+    app.py calls gee_timeseries.init_gee() on startup and stores the result in
+    st.session_state.gee_available. If that flag is True, GEE is already
+    initialised — just import and return the ee module. Calling ee.Initialize()
+    a second time raises an exception and would incorrectly report no credentials.
     """
     try:
         import ee
         import json
-        import streamlit as st
 
-        # If GEE is already initialised (by app.py startup), just return the module.
-        try:
-            ee.data.getInfo('projects/earthengine-public')
+        # GEE already initialised by app.py — return module directly.
+        if st.session_state.get("gee_available", False):
             return ee
-        except ee.ee_exception.EEException:
-            pass  # Not yet initialised — proceed with init below.
 
-        secrets = st.secrets.get("gee", {})
+        # First-time init (e.g. running locally before app.py has set the flag).
+        secrets  = st.secrets.get("gee", {})
         svc_json = secrets.get("GEE_SERVICE_ACCOUNT_JSON", "")
         project  = secrets.get("GEE_PROJECT", "")
 
