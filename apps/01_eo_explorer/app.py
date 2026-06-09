@@ -2568,15 +2568,18 @@ if selected_module == "🌿 Land Cover Intelligence":
 
     # Initialise session state keys used by land_cover.py
     for _k, _v in [
-        ("lc_scene",          None),
-        ("lc_kmeans",         None),
-        ("lc_rf",             None),
-        ("lc_ai",             None),
-        ("lc_ai_model",       None),
-        ("lc_region",         ""),
-        ("lc_pending",        None),
-        ("lc_geocoded_place", ""),
-        ("lc_geocoded_bbox",  None),
+        ("lc_scene",             None),
+        ("lc_kmeans",            None),
+        ("lc_rf",                None),
+        ("lc_ai",                None),
+        ("lc_ai_model",          None),
+        ("lc_region",            ""),
+        ("lc_pending",           None),
+        ("lc_geocoded_place",    ""),
+        ("lc_geocoded_bbox",     None),
+        ("lc_available_scenes",  None),
+        ("lc_search_bbox",       None),
+        ("lc_search_region",     ""),
     ]:
         if _k not in st.session_state:
             st.session_state[_k] = _v

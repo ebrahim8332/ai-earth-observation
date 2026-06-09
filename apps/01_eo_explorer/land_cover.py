@@ -164,11 +164,12 @@ def _build_rgb_from_bands(band_arrays, valid_mask=None):
     return rgb
 
 
-def fetch_scene(bbox, date_range, max_cloud=10):
-    """Search Planetary Computer and fetch five bands for the best scene.
+def search_scenes(bbox, date_range, max_cloud=10):
+    """Search Planetary Computer and return a list of available scenes.
 
-    Returns a dict with keys: rgb, bands, ndvi, ndwi, ndbi, scene_date,
-    scene_cloud, item_id. Returns None on failure.
+    Returns a list of dicts — one per scene — sorted by date descending.
+    Each dict has: item_id, date, cloud_cover, label (for the selectbox).
+    Does not fetch any band data — that happens only after the user picks a scene.
     """
     try:
         catalog = pystac_client.Client.open(
@@ -182,11 +183,47 @@ def fetch_scene(bbox, date_range, max_cloud=10):
         )
         items = list(search.items())
         if not items:
-            return None, "No scenes found for this location and date range."
+            return [], "No scenes found. Try widening the date range or increasing max cloud %."
 
-        items.sort(key=lambda x: x.properties.get("eo:cloud_cover", 100))
-        item  = items[0]
-        h     = _compute_img_height(bbox)
+        items.sort(key=lambda x: x.datetime, reverse=True)
+        scenes = []
+        for item in items:
+            cloud = item.properties.get("eo:cloud_cover", 0)
+            date  = item.datetime.strftime("%Y-%m-%d")
+            scenes.append({
+                "item_id":     item.id,
+                "date":        date,
+                "cloud_cover": round(cloud, 1),
+                "label":       f"{date}  —  cloud {cloud:.1f}%",
+            })
+        return scenes, None
+
+    except Exception as e:
+        return [], str(e)
+
+
+def fetch_scene(bbox, item_id, max_cloud=10):
+    """Fetch five Sentinel-2 bands for a specific scene (item_id).
+
+    item_id comes from search_scenes() — the user chose it from the selectbox.
+    Returns a dict with keys: rgb, bands, ndvi, ndwi, ndbi, valid_mask,
+    scene_date, scene_cloud, item_id, shape.
+    """
+    try:
+        catalog = pystac_client.Client.open(
+            PC_STAC_URL, modifier=planetary_computer.sign_inplace
+        )
+        # Fetch the specific item by ID
+        search = catalog.search(
+            collections=["sentinel-2-l2a"],
+            ids=[item_id],
+        )
+        items = list(search.items())
+        if not items:
+            return None, f"Could not retrieve scene {item_id}."
+
+        item = items[0]
+        h    = _compute_img_height(bbox)
 
         # Fetch five bands for ML algorithms
         band_arrays = {}
@@ -647,9 +684,11 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
 
 **How to use it:**
 1. Type a location and set a date range
-2. Click Run Classification
-3. Explore the K-means and Random Forest tabs
-4. Click Get AI Interpretation for a structured analysis
+2. Click Find Scenes — see all available Sentinel-2 scenes with date and cloud cover
+3. Pick the scene you want from the list
+4. Click Run Classification
+5. Explore the K-means and Random Forest tabs
+6. Click Get AI Interpretation for a structured analysis
         """)
 
     # --- Controls ---
@@ -681,10 +720,17 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
     with col_cloud:
         lc_max_cloud = st.slider("Max cloud %", 0, 30, 10, key="lc_cloud")
 
-    col_k, col_btn = st.columns([1, 3])
+    col_k, col_find, col_run = st.columns([1, 2, 2])
     with col_k:
         n_clusters = st.slider("K-means clusters", 3, 8, 5, key="lc_k")
-    with col_btn:
+    with col_find:
+        st.write("")
+        find_btn = st.button(
+            "🔍 Find Available Scenes",
+            use_container_width=True,
+            key="lc_find",
+        )
+    with col_run:
         st.write("")
         run_btn = st.button(
             "▶ Run Classification",
@@ -746,22 +792,54 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
         else:
             st.caption(f"📍 Analysis area: {width_km} × {height_km} km")
 
-    # --- Run ---
-    if run_btn:
+    # --- Step 1: Find available scenes ---
+    if find_btn:
         if not lc_bbox:
             st.warning("Enter a location first.")
         else:
             date_range = f"{lc_date_start.isoformat()}/{lc_date_end.isoformat()}"
+            with st.spinner(f"Searching for Sentinel-2 scenes over {lc_region_name}..."):
+                scenes, err = search_scenes(lc_bbox, date_range, lc_max_cloud)
+            if err:
+                st.error(f"Search failed: {err}")
+            elif not scenes:
+                st.warning("No scenes found. Try a wider date range or higher max cloud %.")
+            else:
+                st.session_state.lc_available_scenes = scenes
+                st.session_state.lc_search_bbox      = lc_bbox
+                st.session_state.lc_search_region    = lc_region_name
+
+    # --- Scene selector — shown after search ---
+    selected_item_id = None
+    if st.session_state.get("lc_available_scenes"):
+        scenes = st.session_state.lc_available_scenes
+        st.success(f"Found {len(scenes)} scene{'s' if len(scenes) != 1 else ''} — pick one below.")
+        labels     = [s["label"] for s in scenes]
+        chosen_idx = st.selectbox(
+            "Select scene",
+            range(len(labels)),
+            format_func=lambda i: labels[i],
+            key="lc_scene_selector",
+        )
+        selected_item_id = scenes[chosen_idx]["item_id"]
+
+    # --- Step 2: Run classification on chosen scene ---
+    if run_btn:
+        if not lc_bbox:
+            st.warning("Enter a location first.")
+        elif not selected_item_id:
+            st.warning("Click **Find Available Scenes** first, then pick a scene from the list.")
+        else:
             st.session_state.lc_scene    = None
             st.session_state.lc_kmeans   = None
             st.session_state.lc_rf       = None
             st.session_state.lc_ai       = None
             st.session_state.lc_pending  = {
-                "bbox":       lc_bbox,
-                "date_range": date_range,
+                "bbox":       st.session_state.get("lc_search_bbox", lc_bbox),
+                "item_id":    selected_item_id,
                 "max_cloud":  lc_max_cloud,
                 "n_clusters": n_clusters,
-                "region":     lc_region_name,
+                "region":     st.session_state.get("lc_search_region", lc_region_name),
             }
             st.rerun()
 
@@ -770,8 +848,8 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
         p = st.session_state.lc_pending
         st.session_state.lc_pending = None
 
-        with st.spinner(f"Fetching Sentinel-2 bands for {p['region']} (5 bands, ~15 seconds)..."):
-            scene, err = fetch_scene(p["bbox"], p["date_range"], p["max_cloud"])
+        with st.spinner(f"Fetching Sentinel-2 bands for {p['region']} (~15 seconds)..."):
+            scene, err = fetch_scene(p["bbox"], p["item_id"], p["max_cloud"])
 
         if err:
             st.error(f"Data fetch failed: {err}")
