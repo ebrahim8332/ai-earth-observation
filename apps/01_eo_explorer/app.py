@@ -35,6 +35,7 @@ import imagery_interpreter
 import map_picker
 import methane_explorer
 import land_cover
+import corridor_risk
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -70,7 +71,7 @@ with st.sidebar:
     st.markdown("### Module")
     selected_module = st.radio(
         "Navigate",
-        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer", "🌫️ Emissions Explorer", "🌿 Land Cover Intelligence"],
+        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer", "🌫️ Emissions Explorer", "🌿 Land Cover Intelligence", "⚠️ Corridor Risk Intelligence"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -2709,6 +2710,16 @@ if selected_module == "🌿 Land Cover Intelligence":
     st.stop()
 
 # ---------------------------------------------------------------------------
+# MODULE 8 — Corridor Risk Intelligence (Arc 2)
+# Multi-algorithm vegetation encroachment analysis via GEE NDVI time series.
+# ---------------------------------------------------------------------------
+
+if selected_module == "⚠️ Corridor Risk Intelligence":
+
+    corridor_risk.render()
+    st.stop()
+
+# ---------------------------------------------------------------------------
 # MODULE 0 — Welcome panel (default when Welcome is selected)
 # ---------------------------------------------------------------------------
 
@@ -2846,7 +2857,7 @@ with col_b:
 
 st.divider()
 st.caption(
-    "EOIL Portal v1.9 — Earth Observation Innovation Lab. Modules: Spectral, Time Series, SAR, Change Detection, AI Imagery Interpreter, Emissions Explorer, Land Cover Intelligence. "
+    "EOIL Portal v2.0 — Earth Observation Innovation Lab. Modules: Spectral, Time Series, SAR, Change Detection, AI Imagery Interpreter, Emissions Explorer, Land Cover Intelligence, Corridor Risk Intelligence. "
     "Built with Claude Code. "
     "Login and access controls will be added in a future version."
 )
