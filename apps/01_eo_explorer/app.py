@@ -2670,6 +2670,32 @@ with col5:
 
 st.divider()
 
+col6, col7 = st.columns(2)
+
+with col6:
+    st.markdown("#### 🌫️ Emissions Explorer")
+    st.markdown(
+        "Map atmospheric gas concentrations for any region and date. "
+        "Visualise methane, nitrogen dioxide, carbon monoxide, and sulphur dioxide "
+        "from TROPOMI satellite measurements. Compare two dates to see concentration change."
+    )
+    st.markdown("**Sensor:** Sentinel-5P TROPOMI (ESA / Copernicus)")
+    st.markdown("**Data:** Google Earth Engine")
+    st.markdown("**Question:** Where are elevated emissions occurring — and did they change?")
+
+with col7:
+    st.markdown("#### 🌿 Land Cover Intelligence")
+    st.markdown(
+        "Classify land cover for any location using Sentinel-2 multispectral imagery. "
+        "Two algorithms run on the same scene: K-means unsupervised clustering and "
+        "Random Forest supervised classification. Compare outputs and see where they agree."
+    )
+    st.markdown("**Sensor:** Sentinel-2 L2A")
+    st.markdown("**Data:** Planetary Computer (Microsoft)")
+    st.markdown("**Question:** What land cover types are present — and how confident is the classification?")
+
+st.divider()
+
 st.markdown("### How to get started")
 st.markdown(
     "Use the **sidebar on the left** to navigate between modules. "
