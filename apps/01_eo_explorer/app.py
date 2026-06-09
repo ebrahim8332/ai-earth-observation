@@ -2605,7 +2605,7 @@ st.divider()
 
 st.markdown("### What you can do here")
 
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("#### 🔬 Spectral Explorer")
@@ -2630,6 +2630,10 @@ with col2:
     st.markdown("**Data:** Google Earth Engine")
     st.markdown("**Question:** How has this location changed over time?")
 
+st.divider()
+
+col3, col4 = st.columns(2)
+
 with col3:
     st.markdown("#### 📡 SAR Explorer")
     st.markdown(
@@ -2642,10 +2646,6 @@ with col3:
     st.markdown("**Data:** Google Earth Engine")
     st.markdown("**Question:** What can radar see that cameras cannot?")
 
-st.divider()
-
-col4, col5 = st.columns(2)
-
 with col4:
     st.markdown("#### 🔀 Change Detection")
     st.markdown(
@@ -2656,6 +2656,10 @@ with col4:
     st.markdown("**Sensor:** Sentinel-2 SR, MODIS (fallback)")
     st.markdown("**Data:** Google Earth Engine")
     st.markdown("**Question:** What changed between two dates?")
+
+st.divider()
+
+col5, col6 = st.columns(2)
 
 with col5:
     st.markdown("#### 🔍 AI Imagery Interpreter")
@@ -2668,10 +2672,6 @@ with col5:
     st.markdown("**Data:** Planetary Computer (Microsoft)")
     st.markdown("**Question:** What does this place look like — and what does it mean?")
 
-st.divider()
-
-col6, col7 = st.columns(2)
-
 with col6:
     st.markdown("#### 🌫️ Emissions Explorer")
     st.markdown(
@@ -2682,6 +2682,10 @@ with col6:
     st.markdown("**Sensor:** Sentinel-5P TROPOMI (ESA / Copernicus)")
     st.markdown("**Data:** Google Earth Engine")
     st.markdown("**Question:** Where are elevated emissions occurring — and did they change?")
+
+st.divider()
+
+col7, col8 = st.columns(2)
 
 with col7:
     st.markdown("#### 🌿 Land Cover Intelligence")
