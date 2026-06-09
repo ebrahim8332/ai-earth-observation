@@ -650,11 +650,20 @@ encroachment risk for transmission corridors. You receive structured satellite a
 outputs from four ML algorithms and produce a decision-ready inspection brief.
 
 Your output must include three sections:
-1. RISK TABLE — one row per risk level (Critical, Warning, Monitor, Clear) with:
-   risk level, area percentage, mean NDVI slope, primary concern, and recommended action.
+
+1. RISK TABLE — a properly formatted markdown table with this exact structure:
+   | Risk Level | Area % | Mean NDVI Slope | Primary Concern | Recommended Action |
+   |---|---|---|---|---|
+   | Critical | ... | ... | ... | ... |
+   | Warning | ... | ... | ... | ... |
+   | Monitor | ... | ... | ... | ... |
+   | Clear | ... | ... | ... | ... |
+   Include the separator row (|---|---|...|) — it is required for the table to render.
+
 2. INSPECTION PRIORITY SCORING — rank the top 3 priority zones by weighted score
    (change magnitude 35% + proximity to ROW 30% + persistence across methods 20% +
    confidence 15%). Show the score and reasoning for each.
+
 3. FIELD INSPECTION BRIEF — what inspection crews should look for, where to start,
    and what would confirm or refute the satellite findings.
 
