@@ -751,11 +751,32 @@ produce different risk patterns depending on local conditions.
     centre_lat = (south + north) / 2
     centre_lon = (west  + east)  / 2
 
+    # Tile layer toggle — two options covering the main use cases
+    TILE_OPTIONS = {
+        "Satellite": {
+            "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            "attr":  "Esri World Imagery",
+        },
+        "Street map": {
+            "tiles": "OpenStreetMap",
+            "attr":  "OpenStreetMap contributors",
+        },
+    }
+
+    tile_choice = st.radio(
+        "Map view",
+        options=list(TILE_OPTIONS.keys()),
+        index=0,
+        horizontal=True,
+        key="cr_tile_choice",
+    )
+    tile_cfg = TILE_OPTIONS[tile_choice]
+
     m = folium.Map(
         location=[centre_lat, centre_lon],
         zoom_start=10,
-        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attr='Esri World Imagery',
+        tiles=tile_cfg["tiles"],
+        attr=tile_cfg["attr"],
     )
 
     # Draw the corridor bounding box as a rectangle
@@ -781,7 +802,7 @@ produce different risk patterns depending on local conditions.
         ),
     ).add_to(m)
 
-    st_folium(m, height=300, use_container_width=True, returned_objects=[])
+    st_folium(m, height=420, use_container_width=True, returned_objects=[])
 
     # --- Run button ---
     col_btn, col_status = st.columns([1, 3])
