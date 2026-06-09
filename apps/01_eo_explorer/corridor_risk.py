@@ -137,11 +137,24 @@ KM_COLORS       = ['#d4b483', '#ffffb3', '#a6d96a', '#1a9850']
 # ---------------------------------------------------------------------------
 
 def _init_gee():
-    """Return an initialised GEE ee module, or None on failure."""
+    """Return an initialised GEE ee module, or None on failure.
+
+    app.py calls gee_timeseries.init_gee() on startup, which runs ee.Initialize().
+    If GEE is already initialised when this function runs, skip the init call —
+    calling ee.Initialize() twice raises an exception that would otherwise make
+    this function return None and incorrectly report that GEE is unavailable.
+    """
     try:
         import ee
         import json
         import streamlit as st
+
+        # If GEE is already initialised (by app.py startup), just return the module.
+        try:
+            ee.data.getInfo('projects/earthengine-public')
+            return ee
+        except ee.ee_exception.EEException:
+            pass  # Not yet initialised — proceed with init below.
 
         secrets = st.secrets.get("gee", {})
         svc_json = secrets.get("GEE_SERVICE_ACCOUNT_JSON", "")
