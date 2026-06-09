@@ -306,7 +306,7 @@ def run_kmeans(scene, n_clusters=5):
             label_map[stats["cluster"]] = "Dense vegetation"
         elif stats["ndvi"] > 0.15:
             label_map[stats["cluster"]] = "Crops / sparse veg"
-        elif stats["ndbi"] > 0.15 and stats["ndvi"] < 0.10:
+        elif stats["ndbi"] > 0.25 and stats["ndvi"] < 0.10 and stats["ndwi"] < -0.20:
             label_map[stats["cluster"]] = "Urban / built-up"
         else:
             label_map[stats["cluster"]] = "Desert / bare soil"
@@ -373,7 +373,7 @@ def run_random_forest(scene, n_estimators=100):
     pseudo[v & (ndwi_flat > 0.15) & (ndvi_flat < 0.05)]                       = 1  # Water
     pseudo[v & (ndvi_flat > 0.50)]                                              = 2  # Dense veg
     pseudo[v & (ndvi_flat > 0.20) & (ndvi_flat <= 0.50) & (ndwi_flat < 0.1)]  = 3  # Crops
-    pseudo[v & (ndbi_flat > 0.15) & (ndvi_flat < 0.10) & (ndwi_flat < 0.0)]   = 4  # Urban
+    pseudo[v & (ndbi_flat > 0.25) & (ndvi_flat < 0.10) & (ndwi_flat < -0.20)] = 4  # Urban
     pseudo[v & (ndvi_flat < 0.08) & (ndwi_flat < -0.10) & (pseudo == 0)]      = 5  # Desert
 
     train_mask = pseudo > 0
