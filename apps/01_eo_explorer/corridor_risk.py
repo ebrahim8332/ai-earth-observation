@@ -722,6 +722,13 @@ def render():
         "Four ML algorithms on Sentinel-2 NDVI time series produce a prioritised risk composite."
     )
 
+    # GEE connection status — shown at the top so it is visible before any interaction
+    gee_ok = st.session_state.get("gee_available", False)
+    if gee_ok:
+        st.caption("🟢 GEE connected — live Sentinel-2 data active.")
+    else:
+        st.caption("🔴 GEE not connected. This module requires live GEE credentials.")
+
     with st.expander("ℹ️ What does this module do?", expanded=False):
         st.markdown("""
 **This module answers two questions:**
@@ -828,20 +835,11 @@ produce different risk patterns depending on local conditions.
     st_folium(m, height=420, use_container_width=True, returned_objects=[])
 
     # --- Run button ---
-    col_btn, col_status = st.columns([1, 3])
-    with col_btn:
-        run_btn = st.button(
-            "▶ Run Analysis",
-            type="primary",
-            use_container_width=True,
-            key="cr_run",
-        )
-    with col_status:
-        gee_ok = st.session_state.get("gee_available", False)
-        if gee_ok:
-            st.caption("🟢 GEE connected — live data active.")
-        else:
-            st.caption("🔴 GEE not connected. This module requires live GEE credentials.")
+    run_btn = st.button(
+        "▶ Run Analysis",
+        type="primary",
+        key="cr_run",
+    )
 
     # --- Session state initialisation ---
     for k, v in [
