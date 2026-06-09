@@ -127,17 +127,15 @@ def _fetch_rgb(item, bbox, width, height):
     return None
 
 
-def _build_rgb_from_bands(band_arrays):
+def _build_rgb_from_bands(band_arrays, valid_mask=None):
     """Build true-color RGB from already-fetched B04/B03/B02 band arrays.
 
-    Individual band fetches cover the full requested bbox (they can pull from
-    multiple tiles). This guarantees the RGB covers exactly the same area as
-    the K-means and Random Forest classifications.
+    valid_mask: boolean array (H, W). True = real satellite data. False = NoData
+    (pixel is outside the satellite tile footprint — all bands returned 0).
+    NoData pixels are rendered as light grey so they are clearly non-data.
 
-    Uses 2nd-98th percentile stretching so the image is bright and readable
-    regardless of scene brightness. The PC rendering API uses rescale=0,3000
-    which is equivalent — it clips and stretches the low end of the reflectance
-    range. We replicate that effect through percentile normalization.
+    Uses 2nd-98th percentile stretching on valid pixels only, so the image
+    is bright and readable regardless of scene brightness.
     """
     r = band_arrays.get("B04")
     g = band_arrays.get("B03")
@@ -145,16 +143,25 @@ def _build_rgb_from_bands(band_arrays):
     if r is None or g is None or b is None:
         return None
 
+    if valid_mask is None:
+        valid_mask = (r > 0) | (g > 0) | (b > 0)
+
     def _stretch(band):
-        """Stretch band to 0-1 using 2nd-98th percentile of all pixels."""
-        lo = float(np.percentile(band, 2))
-        hi = float(np.percentile(band, 98))
+        """Stretch band to 0-1 using 2nd-98th percentile of valid pixels only."""
+        vals = band[valid_mask]
+        if vals.size == 0:
+            return np.zeros_like(band, dtype=np.float32)
+        lo = float(np.percentile(vals, 2))
+        hi = float(np.percentile(vals, 98))
         if hi <= lo:
             hi = lo + 1e-6
         return np.clip((band - lo) / (hi - lo), 0, 1)
 
     rgb = np.stack([_stretch(r), _stretch(g), _stretch(b)], axis=-1)
-    return (rgb * 255).astype(np.uint8)
+    rgb = (rgb * 255).astype(np.uint8)
+    # NoData pixels → light grey (not black, which looks like a render failure)
+    rgb[~valid_mask] = [210, 210, 210]
+    return rgb
 
 
 def fetch_scene(bbox, date_range, max_cloud=10):
@@ -191,18 +198,28 @@ def fetch_scene(bbox, date_range, max_cloud=10):
         if len(band_arrays) < 5:
             return None, f"Only {len(band_arrays)} of 5 bands returned. Try a different date range."
 
-        # True-color RGB — built from the same band arrays used by the ML algorithms.
-        # The composite PC API (_fetch_rgb) returns only one Sentinel-2 tile, which
-        # leaves the upper portion of a large bbox black. The individual band fetches
-        # cover the full bbox, so building RGB from those arrays guarantees the
-        # true color matches the classification extent exactly.
-        rgb = _build_rgb_from_bands(band_arrays)
+        # Valid pixel mask — pixels where every band is zero are outside the
+        # satellite tile footprint (NoData). They must be excluded from classification
+        # and shown as grey in all output images.
+        b02 = band_arrays["B02"]
+        valid_mask = (
+            (band_arrays["B02"] > 0) |
+            (band_arrays["B03"] > 0) |
+            (band_arrays["B04"] > 0) |
+            (band_arrays["B08"] > 0) |
+            (band_arrays["B11"] > 0)
+        )
 
-        # Spectral indices
+        # True-color RGB — built from the same band arrays used by the ML algorithms.
+        rgb = _build_rgb_from_bands(band_arrays, valid_mask)
+
+        # Spectral indices — only meaningful on valid pixels; set NoData to 0
         def safe_index(a, b):
             denom = a + b
             denom = np.where(denom == 0, 1e-6, denom)
-            return (a - b) / denom
+            result = (a - b) / denom
+            result[~valid_mask] = 0.0
+            return result
 
         ndvi = safe_index(band_arrays["B08"], band_arrays["B04"])
         ndwi = safe_index(band_arrays["B03"], band_arrays["B08"])
@@ -214,6 +231,7 @@ def fetch_scene(bbox, date_range, max_cloud=10):
             "ndvi":        ndvi,
             "ndwi":        ndwi,
             "ndbi":        ndbi,
+            "valid_mask":  valid_mask,
             "scene_date":  item.datetime.strftime("%Y-%m-%d"),
             "scene_cloud": item.properties.get("eo:cloud_cover", 0),
             "item_id":     item.id,
@@ -232,10 +250,12 @@ def run_kmeans(scene, n_clusters=5):
     """Run K-means clustering on the 8-feature stack and return results dict.
 
     Features: 5 bands + NDVI + NDWI + NDBI = 8 features per pixel.
-    Returns cluster_map, cluster_stats, label_map.
+    Only valid pixels (inside the satellite tile footprint) are clustered.
+    NoData pixels are assigned cluster -1 and shown as grey in the output.
     """
-    h, w = scene["shape"]
+    h, w  = scene["shape"]
     bands = scene["bands"]
+    valid = scene.get("valid_mask", np.ones((h, w), dtype=bool))
 
     feature_stack = np.stack([
         bands["B02"], bands["B03"], bands["B04"],
@@ -243,13 +263,19 @@ def run_kmeans(scene, n_clusters=5):
         scene["ndvi"], scene["ndwi"], scene["ndbi"],
     ], axis=-1)
 
-    X = feature_stack.reshape(h * w, 8)
-    scaler   = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    X        = feature_stack.reshape(h * w, 8)
+    valid_flat = valid.flatten()
 
-    kmeans        = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
-    cluster_labels = kmeans.fit_predict(X_scaled)
-    cluster_map    = cluster_labels.reshape(h, w)
+    # Fit and predict only on valid pixels
+    scaler   = StandardScaler()
+    X_valid  = scaler.fit_transform(X[valid_flat])
+    kmeans   = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
+    labels_valid = kmeans.fit_predict(X_valid)
+
+    # Build full cluster map: -1 = NoData, 0..n_clusters-1 = cluster id
+    cluster_labels = np.full(h * w, -1, dtype=int)
+    cluster_labels[valid_flat] = labels_valid
+    cluster_map = cluster_labels.reshape(h, w)
 
     ndvi_flat = scene["ndvi"].flatten()
     ndwi_flat = scene["ndwi"].flatten()
@@ -294,12 +320,14 @@ def run_kmeans(scene, n_clusters=5):
 
 
 def kmeans_to_color_image(kmeans_result):
-    """Convert cluster map to an RGB uint8 image using LAND_COVER_COLORS."""
+    """Convert cluster map to an RGB uint8 image using LAND_COVER_COLORS.
+    Pixels with cluster id -1 are NoData — rendered as light grey.
+    """
     cluster_map = kmeans_result["cluster_map"]
     label_map   = kmeans_result["label_map"]
     h, w        = cluster_map.shape
 
-    img = np.zeros((h, w, 3), dtype=np.uint8)
+    img = np.full((h, w, 3), 210, dtype=np.uint8)  # default = grey (NoData)
     for c, label in label_map.items():
         color = LAND_COVER_COLORS.get(label, "#888888")
         rgb   = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
@@ -313,17 +341,21 @@ def kmeans_to_color_image(kmeans_result):
 # ---------------------------------------------------------------------------
 
 def run_random_forest(scene, n_estimators=100):
-    """Train Random Forest with pseudo-labels and predict all pixels.
+    """Train Random Forest with pseudo-labels and predict valid pixels only.
 
-    Pseudo-labels are generated from strict spectral thresholds.
-    Only high-confidence pixels are used as training data.
+    NoData pixels (outside the satellite tile footprint) are excluded from
+    training and prediction. They are assigned label 0 in the output map
+    and rendered as grey.
     """
     h, w      = scene["shape"]
     bands     = scene["bands"]
+    valid     = scene.get("valid_mask", np.ones((h, w), dtype=bool))
+    valid_flat = valid.flatten()
+    n_pixels  = h * w
+
     ndvi_flat = scene["ndvi"].flatten()
     ndwi_flat = scene["ndwi"].flatten()
     ndbi_flat = scene["ndbi"].flatten()
-    n_pixels  = h * w
 
     feature_stack = np.stack([
         bands["B02"], bands["B03"], bands["B04"],
@@ -331,17 +363,18 @@ def run_random_forest(scene, n_estimators=100):
         scene["ndvi"], scene["ndwi"], scene["ndbi"],
     ], axis=-1)
 
-    X        = feature_stack.reshape(n_pixels, 8)
-    scaler   = StandardScaler()
+    X      = feature_stack.reshape(n_pixels, 8)
+    scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # Generate pseudo-labels
+    # Generate pseudo-labels on valid pixels only
     pseudo = np.zeros(n_pixels, dtype=int)
-    pseudo[(ndwi_flat > 0.15) & (ndvi_flat < 0.05)]                               = 1  # Water
-    pseudo[(ndvi_flat > 0.50)]                                                      = 2  # Dense veg
-    pseudo[(ndvi_flat > 0.20) & (ndvi_flat <= 0.50) & (ndwi_flat < 0.1)]          = 3  # Crops
-    pseudo[(ndbi_flat > 0.15) & (ndvi_flat < 0.10) & (ndwi_flat < 0.0)]           = 4  # Urban
-    pseudo[(ndvi_flat < 0.08) & (ndwi_flat < -0.10) & (pseudo == 0)]              = 5  # Desert
+    v = valid_flat  # shorthand
+    pseudo[v & (ndwi_flat > 0.15) & (ndvi_flat < 0.05)]                       = 1  # Water
+    pseudo[v & (ndvi_flat > 0.50)]                                              = 2  # Dense veg
+    pseudo[v & (ndvi_flat > 0.20) & (ndvi_flat <= 0.50) & (ndwi_flat < 0.1)]  = 3  # Crops
+    pseudo[v & (ndbi_flat > 0.15) & (ndvi_flat < 0.10) & (ndwi_flat < 0.0)]   = 4  # Urban
+    pseudo[v & (ndvi_flat < 0.08) & (ndwi_flat < -0.10) & (pseudo == 0)]      = 5  # Desert
 
     train_mask = pseudo > 0
     labeled    = int(train_mask.sum())
@@ -358,8 +391,10 @@ def run_random_forest(scene, n_estimators=100):
     )
     rf.fit(X_train, y_train)
 
-    rf_labels = rf.predict(X_scaled)
-    rf_map    = rf_labels.reshape(h, w)
+    # Predict only on valid pixels — NoData pixels stay as 0 (unclassified)
+    rf_labels = np.zeros(n_pixels, dtype=int)
+    rf_labels[valid_flat] = rf.predict(X_scaled[valid_flat])
+    rf_map = rf_labels.reshape(h, w)
 
     feature_names = ["B02", "B03", "B04", "B08", "B11", "NDVI", "NDWI", "NDBI"]
     importances   = rf.feature_importances_
@@ -368,7 +403,7 @@ def run_random_forest(scene, n_estimators=100):
         "rf_map":         rf_map,
         "importances":    importances,
         "feature_names":  feature_names,
-        "labeled_pct":    float(100.0 * labeled / n_pixels),
+        "labeled_pct":    float(100.0 * labeled / valid_flat.sum()),
         "class_counts": {
             "Water":             int((rf_labels == 1).sum()),
             "Dense vegetation":  int((rf_labels == 2).sum()),
@@ -380,7 +415,9 @@ def run_random_forest(scene, n_estimators=100):
 
 
 def rf_to_color_image(rf_result):
-    """Convert RF label map to an RGB uint8 image using LAND_COVER_COLORS."""
+    """Convert RF label map to an RGB uint8 image using LAND_COVER_COLORS.
+    Pixels with label 0 are NoData — rendered as light grey.
+    """
     rf_map = rf_result["rf_map"]
     h, w   = rf_map.shape
 
@@ -388,7 +425,7 @@ def rf_to_color_image(rf_result):
         1: "Water", 2: "Dense vegetation", 3: "Crops / sparse veg",
         4: "Urban / built-up", 5: "Desert / bare soil",
     }
-    img = np.zeros((h, w, 3), dtype=np.uint8)
+    img = np.full((h, w, 3), 210, dtype=np.uint8)  # default = grey (NoData)
     for label_id, label in id_to_label.items():
         color = LAND_COVER_COLORS.get(label, "#888888")
         rgb   = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
