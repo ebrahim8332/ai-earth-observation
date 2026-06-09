@@ -97,17 +97,41 @@ def _fetch_band(item, band_name, bbox, width, height):
     return None
 
 
+def _fetch_rgb(item, bbox, width, height):
+    """Fetch true-color RGB composite exactly as the notebook does.
+
+    Uses the PC multi-band rendering API with rescale=0,3000 and Gamma RGB 2.2.
+    This is a single API call that returns a ready-made RGB PNG — the server
+    composites the three bands and applies gamma in one step.
+
+    rescale=0,3000 (not 0,10000) is intentional: it exposes the low-reflectance
+    range that land surfaces occupy, making the image visually bright and correct.
+    """
+    params = [
+        ("collection",    "sentinel-2-l2a"),
+        ("item",          item.id),
+        ("assets",        "B04"), ("assets", "B03"), ("assets", "B02"),
+        ("asset_bidx",    "B04|1"), ("asset_bidx", "B03|1"), ("asset_bidx", "B02|1"),
+        ("rescale",       "0,3000"), ("rescale", "0,3000"), ("rescale", "0,3000"),
+        ("color_formula", "Gamma RGB 2.2"),
+        ("width",         str(width)),
+        ("height",        str(height)),
+        ("bbox",          f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"),
+    ]
+    try:
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        if resp.status_code == 200:
+            return np.array(Image.open(BytesIO(resp.content)).convert("RGB"))
+    except Exception:
+        pass
+    return None
+
+
 def _build_rgb_from_bands(band_arrays):
-    """Build a true-color uint8 RGB image from already-fetched B04/B03/B02 arrays.
+    """Fallback: build RGB from already-fetched band arrays.
 
-    Uses percentile normalization on valid (non-zero) pixels so the image is
-    correctly brightened regardless of how dark or bright the scene is.
-    Pixels with zero value in all three bands are treated as NoData and rendered
-    as light grey rather than black, which is less confusing visually.
-
-    Sentinel-2 L2A scenes can have zero-value NoData pixels where the satellite
-    tile boundary cuts through the requested bbox — that is a data coverage issue,
-    not a code bug.
+    Used only when _fetch_rgb fails. Applies percentile normalization on valid
+    pixels and sets NoData pixels to light grey.
     """
     r = band_arrays.get("B04")
     g = band_arrays.get("B03")
@@ -115,11 +139,9 @@ def _build_rgb_from_bands(band_arrays):
     if r is None or g is None or b is None:
         return None
 
-    # Build a valid-pixel mask — any pixel that has signal in at least one band
     valid = (r > 0) | (g > 0) | (b > 0)
 
     def _stretch(band):
-        """Stretch a single band using 2nd-98th percentile of valid pixels."""
         valid_vals = band[valid]
         if valid_vals.size == 0:
             return np.zeros_like(band)
@@ -127,20 +149,11 @@ def _build_rgb_from_bands(band_arrays):
         hi = float(np.percentile(valid_vals, 98))
         if hi <= lo:
             hi = lo + 1e-6
-        stretched = (band - lo) / (hi - lo)
-        return np.clip(stretched, 0, 1)
+        return np.clip((band - lo) / (hi - lo), 0, 1)
 
-    r_s = _stretch(r)
-    g_s = _stretch(g)
-    b_s = _stretch(b)
-
-    # Stack and convert to uint8
-    rgb = np.stack([r_s, g_s, b_s], axis=-1)
+    rgb = np.stack([_stretch(r), _stretch(g), _stretch(b)], axis=-1)
     rgb = (rgb * 255).astype(np.uint8)
-
-    # Replace NoData pixels (black) with light grey so they are clearly non-data
     rgb[~valid] = [200, 200, 200]
-
     return rgb
 
 
@@ -168,7 +181,7 @@ def fetch_scene(bbox, date_range, max_cloud=10):
         item  = items[0]
         h     = _compute_img_height(bbox)
 
-        # Fetch five bands — RGB is built from these, no separate API call needed
+        # Fetch five bands for ML algorithms
         band_arrays = {}
         for band in BANDS:
             arr = _fetch_band(item, band, bbox, IMG_WIDTH, h)
@@ -178,8 +191,11 @@ def fetch_scene(bbox, date_range, max_cloud=10):
         if len(band_arrays) < 5:
             return None, f"Only {len(band_arrays)} of 5 bands returned. Try a different date range."
 
-        # Build true-color RGB from the fetched bands
-        rgb = _build_rgb_from_bands(band_arrays)
+        # True-color RGB — use same API call as the notebook (rescale 0-3000, Gamma 2.2)
+        # Fall back to building from band arrays if the composite API call fails
+        rgb = _fetch_rgb(item, bbox, IMG_WIDTH, h)
+        if rgb is None:
+            rgb = _build_rgb_from_bands(band_arrays)
 
         # Spectral indices
         def safe_index(a, b):
