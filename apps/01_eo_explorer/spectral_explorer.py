@@ -329,6 +329,218 @@ def render_ndwi(item, satellite_key: str, width: int = 600,
         return None
 
 
+def render_ndmi(item, satellite_key: str, width: int = 600,
+                bbox: list = None) -> np.ndarray | None:
+    """
+    Render an NDMI map (vegetation moisture index).
+    NDMI = (NIR - SWIR1) / (NIR + SWIR1).
+    Blue colormap: bright blue = high moisture, pale = dry or stressed.
+    """
+    sat = satellite_catalog.SATELLITES[satellite_key]
+    if sat.get("sar"):
+        return None
+
+    if satellite_key == "Sentinel-2 L2A":
+        expression = "(B08-B11)/(B08+B11)"
+    elif satellite_key == "Landsat 8/9":
+        expression = "(nir08-swir16)/(nir08+swir16)"
+    else:
+        return None
+
+    params = [
+        ("collection",    sat["collection"]),
+        ("item",          item.id),
+        ("expression",    expression),
+        ("colormap_name", "blues"),
+        ("rescale",       "-0.5,0.5"),
+        ("width",         str(width)),
+        ("height",        str(width)),
+    ]
+    try:
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        if resp.status_code != 200:
+            return None
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        arr = np.array(img)
+        if bbox:
+            arr = _clip_to_bbox(arr, item.bbox, bbox)
+        else:
+            arr = _crop_to_valid(arr)
+        return arr
+    except Exception:
+        return None
+
+
+def render_nbr(item, satellite_key: str, width: int = 600,
+               bbox: list = None) -> np.ndarray | None:
+    """
+    Render an NBR map (Normalized Burn Ratio).
+    NBR = (NIR - SWIR2) / (NIR + SWIR2).
+    Green-yellow-red colormap: green = healthy vegetation, red = burned or bare.
+    """
+    sat = satellite_catalog.SATELLITES[satellite_key]
+    if sat.get("sar"):
+        return None
+
+    if satellite_key == "Sentinel-2 L2A":
+        expression = "(B08-B12)/(B08+B12)"
+    elif satellite_key == "Landsat 8/9":
+        expression = "(nir08-swir22)/(nir08+swir22)"
+    else:
+        return None
+
+    params = [
+        ("collection",    sat["collection"]),
+        ("item",          item.id),
+        ("expression",    expression),
+        ("colormap_name", "rdylgn"),
+        ("rescale",       "-1,1"),
+        ("width",         str(width)),
+        ("height",        str(width)),
+    ]
+    try:
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        if resp.status_code != 200:
+            return None
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        arr = np.array(img)
+        if bbox:
+            arr = _clip_to_bbox(arr, item.bbox, bbox)
+        else:
+            arr = _crop_to_valid(arr)
+        return arr
+    except Exception:
+        return None
+
+
+def render_savi(item, satellite_key: str, width: int = 600,
+                bbox: list = None) -> np.ndarray | None:
+    """
+    Render a SAVI map (Soil-Adjusted Vegetation Index).
+    SAVI = 1.5 * (NIR - Red) / (NIR + Red + 0.5).
+    Same green-yellow-red colormap as NDVI but corrects for bright bare soil.
+    Better than NDVI in arid and semi-arid areas with sparse vegetation.
+    """
+    sat = satellite_catalog.SATELLITES[satellite_key]
+    if sat.get("sar"):
+        return None
+
+    if satellite_key == "Sentinel-2 L2A":
+        expression = "1.5*(B08-B04)/(B08+B04+0.5)"
+    elif satellite_key == "Landsat 8/9":
+        expression = "1.5*(nir08-red)/(nir08+red+0.5)"
+    else:
+        return None
+
+    params = [
+        ("collection",    sat["collection"]),
+        ("item",          item.id),
+        ("expression",    expression),
+        ("colormap_name", "rdylgn"),
+        ("rescale",       "0,0.8"),
+        ("width",         str(width)),
+        ("height",        str(width)),
+    ]
+    try:
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        if resp.status_code != 200:
+            return None
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        arr = np.array(img)
+        if bbox:
+            arr = _clip_to_bbox(arr, item.bbox, bbox)
+        else:
+            arr = _crop_to_valid(arr)
+        return arr
+    except Exception:
+        return None
+
+
+def render_evi(item, satellite_key: str, width: int = 600,
+               bbox: list = None) -> np.ndarray | None:
+    """
+    Render an EVI map (Enhanced Vegetation Index).
+    EVI = 2.5 * (NIR - Red) / (NIR + 6*Red - 7.5*Blue + 1).
+    Better than NDVI in dense canopy areas where NDVI saturates.
+    Green-yellow-red colormap: green = dense healthy vegetation.
+    """
+    sat = satellite_catalog.SATELLITES[satellite_key]
+    if sat.get("sar"):
+        return None
+
+    if satellite_key == "Sentinel-2 L2A":
+        expression = "2.5*(B08-B04)/(B08+6*B04-7.5*B02+1)"
+    elif satellite_key == "Landsat 8/9":
+        expression = "2.5*(nir08-red)/(nir08+6*red-7.5*blue+1)"
+    else:
+        return None
+
+    params = [
+        ("collection",    sat["collection"]),
+        ("item",          item.id),
+        ("expression",    expression),
+        ("colormap_name", "rdylgn"),
+        ("rescale",       "-0.2,1"),
+        ("width",         str(width)),
+        ("height",        str(width)),
+    ]
+    try:
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        if resp.status_code != 200:
+            return None
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        arr = np.array(img)
+        if bbox:
+            arr = _clip_to_bbox(arr, item.bbox, bbox)
+        else:
+            arr = _crop_to_valid(arr)
+        return arr
+    except Exception:
+        return None
+
+
+def render_bsi(item, satellite_key: str, width: int = 600,
+               bbox: list = None) -> np.ndarray | None:
+    """
+    Render a BSI map (Bare Soil Index).
+    BSI = ((SWIR1 + Red) - (NIR + Blue)) / ((SWIR1 + Red) + (NIR + Blue)).
+    Orange-red colormap: bright orange-red = exposed bare soil.
+    """
+    sat = satellite_catalog.SATELLITES[satellite_key]
+    if sat.get("sar"):
+        return None
+
+    if satellite_key == "Sentinel-2 L2A":
+        expression = "((B11+B04)-(B08+B02))/((B11+B04)+(B08+B02))"
+    elif satellite_key == "Landsat 8/9":
+        expression = "((swir16+red)-(nir08+blue))/((swir16+red)+(nir08+blue))"
+    else:
+        return None
+
+    params = [
+        ("collection",    sat["collection"]),
+        ("item",          item.id),
+        ("expression",    expression),
+        ("colormap_name", "ylorrd"),
+        ("rescale",       "-0.5,0.5"),
+        ("width",         str(width)),
+        ("height",        str(width)),
+    ]
+    try:
+        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
+        if resp.status_code != 200:
+            return None
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        arr = np.array(img)
+        if bbox:
+            arr = _clip_to_bbox(arr, item.bbox, bbox)
+        else:
+            arr = _crop_to_valid(arr)
+        return arr
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Contact sheet (all presets as thumbnails)
 # ---------------------------------------------------------------------------
@@ -336,6 +548,7 @@ def render_ndwi(item, satellite_key: str, width: int = 600,
 def render_contact_sheet(item, satellite_key: str,
                           include_ndvi: bool = True,
                           include_ndwi: bool = True,
+                          include_indices: bool = True,
                           thumb_size: int = 300,
                           bbox: list = None) -> list:
     """
@@ -396,6 +609,78 @@ def render_contact_sheet(item, satellite_key: str,
         results.append({
             "label":    "NDWI",
             "note":     "Water body index. Bright blue = open water.",
+            "array":    arr,
+            "type":     "index",
+            "channels": f"Expression: {expr}",
+        })
+
+    if include_indices and not sat.get("sar"):
+
+        # NDMI — vegetation moisture
+        arr = render_ndmi(item, satellite_key, width=thumb_size, bbox=bbox)
+        if satellite_key == "Sentinel-2 L2A":
+            expr = "(B08 − B11) / (B08 + B11)"
+        else:
+            expr = "(NIR − SWIR1) / (NIR + SWIR1)"
+        results.append({
+            "label":    "NDMI",
+            "note":     "Vegetation moisture. Bright blue = high water content. Pale = dry or stressed.",
+            "array":    arr,
+            "type":     "index",
+            "channels": f"Expression: {expr}",
+        })
+
+        # NBR — burn severity
+        arr = render_nbr(item, satellite_key, width=thumb_size, bbox=bbox)
+        if satellite_key == "Sentinel-2 L2A":
+            expr = "(B08 − B12) / (B08 + B12)"
+        else:
+            expr = "(NIR − SWIR2) / (NIR + SWIR2)"
+        results.append({
+            "label":    "NBR",
+            "note":     "Burn ratio. Green = healthy vegetation. Red = burned or severely damaged.",
+            "array":    arr,
+            "type":     "index",
+            "channels": f"Expression: {expr}",
+        })
+
+        # SAVI — soil-adjusted vegetation
+        arr = render_savi(item, satellite_key, width=thumb_size, bbox=bbox)
+        if satellite_key == "Sentinel-2 L2A":
+            expr = "1.5 × (B08 − B04) / (B08 + B04 + 0.5)"
+        else:
+            expr = "1.5 × (NIR − Red) / (NIR + Red + 0.5)"
+        results.append({
+            "label":    "SAVI",
+            "note":     "Soil-adjusted vegetation. Better than NDVI in arid areas with sparse cover.",
+            "array":    arr,
+            "type":     "index",
+            "channels": f"Expression: {expr}",
+        })
+
+        # EVI — enhanced vegetation
+        arr = render_evi(item, satellite_key, width=thumb_size, bbox=bbox)
+        if satellite_key == "Sentinel-2 L2A":
+            expr = "2.5 × (B08 − B04) / (B08 + 6×B04 − 7.5×B02 + 1)"
+        else:
+            expr = "2.5 × (NIR − Red) / (NIR + 6×Red − 7.5×Blue + 1)"
+        results.append({
+            "label":    "EVI",
+            "note":     "Enhanced vegetation. Better than NDVI in dense canopy where NDVI saturates.",
+            "array":    arr,
+            "type":     "index",
+            "channels": f"Expression: {expr}",
+        })
+
+        # BSI — bare soil
+        arr = render_bsi(item, satellite_key, width=thumb_size, bbox=bbox)
+        if satellite_key == "Sentinel-2 L2A":
+            expr = "((B11 + B04) − (B08 + B02)) / ((B11 + B04) + (B08 + B02))"
+        else:
+            expr = "((SWIR1 + Red) − (NIR + Blue)) / ((SWIR1 + Red) + (NIR + Blue))"
+        results.append({
+            "label":    "BSI",
+            "note":     "Bare soil index. Bright orange-red = exposed bare soil or cleared land.",
             "array":    arr,
             "type":     "index",
             "channels": f"Expression: {expr}",

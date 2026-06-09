@@ -1257,7 +1257,7 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
             f"**All spectral views — {c_info['location_label']} — "
             f"{c_info['scene_date']} — {c_info['sat_key']}**"
         )
-        st.caption("Every named band combination + NDVI + NDWI rendered for comparison.")
+        st.caption("Every named band combination + NDVI + NDWI + NDMI + NBR + SAVI + EVI + BSI rendered for comparison.")
 
         cols_per_row = 3
         for i in range(0, len(valid), cols_per_row):
