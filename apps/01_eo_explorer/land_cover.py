@@ -100,10 +100,14 @@ def _fetch_band(item, band_name, bbox, width, height):
 def _build_rgb_from_bands(band_arrays):
     """Build a true-color uint8 RGB image from already-fetched B04/B03/B02 arrays.
 
-    Uses the same bands the classification uses — no extra API call needed.
-    Applies a simple gamma correction (power 0.5) to brighten the display.
-    Sentinel-2 reflectance values at 0-1 float are typically low (0.05-0.3 for land)
-    so the gamma lift makes the image readable without clipping.
+    Uses percentile normalization on valid (non-zero) pixels so the image is
+    correctly brightened regardless of how dark or bright the scene is.
+    Pixels with zero value in all three bands are treated as NoData and rendered
+    as light grey rather than black, which is less confusing visually.
+
+    Sentinel-2 L2A scenes can have zero-value NoData pixels where the satellite
+    tile boundary cuts through the requested bbox — that is a data coverage issue,
+    not a code bug.
     """
     r = band_arrays.get("B04")
     g = band_arrays.get("B03")
@@ -111,11 +115,32 @@ def _build_rgb_from_bands(band_arrays):
     if r is None or g is None or b is None:
         return None
 
-    # Stack to (H, W, 3), clip to 0-1, apply gamma, convert to uint8
-    rgb = np.stack([r, g, b], axis=-1)
-    rgb = np.clip(rgb, 0, 1)
-    rgb = np.power(rgb, 0.5)          # gamma 0.5 — brightens without blowing out
+    # Build a valid-pixel mask — any pixel that has signal in at least one band
+    valid = (r > 0) | (g > 0) | (b > 0)
+
+    def _stretch(band):
+        """Stretch a single band using 2nd-98th percentile of valid pixels."""
+        valid_vals = band[valid]
+        if valid_vals.size == 0:
+            return np.zeros_like(band)
+        lo = float(np.percentile(valid_vals, 2))
+        hi = float(np.percentile(valid_vals, 98))
+        if hi <= lo:
+            hi = lo + 1e-6
+        stretched = (band - lo) / (hi - lo)
+        return np.clip(stretched, 0, 1)
+
+    r_s = _stretch(r)
+    g_s = _stretch(g)
+    b_s = _stretch(b)
+
+    # Stack and convert to uint8
+    rgb = np.stack([r_s, g_s, b_s], axis=-1)
     rgb = (rgb * 255).astype(np.uint8)
+
+    # Replace NoData pixels (black) with light grey so they are clearly non-data
+    rgb[~valid] = [200, 200, 200]
+
     return rgb
 
 
