@@ -40,12 +40,49 @@ from sklearn.preprocessing import StandardScaler
 # Constants — match the notebook exactly
 # ---------------------------------------------------------------------------
 
-# Default corridor: Central NC transmission corridor (Durham–Raleigh region)
-DEFAULT_CORRIDOR = {
-    "name":  "Central NC Transmission Corridor",
-    "bbox":  [-79.05, 35.89, -78.77, 35.98],
-    "notes": "24 km × 8 km utility ROW buffer zone, Durham–Raleigh region, NC",
+# Pre-defined corridors — five geographies covering different vegetation regimes.
+# Each bbox is [west, south, east, north] in decimal degrees, sized ~25 x 10 km
+# so the 240x90 pixel grid stays at ~100m resolution.
+#
+# Seasonal note for Tanzania: April–September is the dry season in East Africa.
+# NDVI slopes will be mostly negative (vegetation drying out). Vegetation that
+# stays green through the dry season — water-dependent species, invasive acacias —
+# is flagged as anomalous by Isolation Forest. That IS the encroachment signal.
+CORRIDORS = {
+    "Central NC, USA — Durham–Raleigh": {
+        "bbox":    [-79.05, 35.89, -78.77, 35.98],
+        "notes":   "24 km × 8 km  |  Mixed deciduous forest  |  Validated study corridor",
+        "climate": "Temperate. NDVI rises April→September as canopy fills in. "
+                   "Positive slopes = active encroachment toward the ROW.",
+    },
+    "East Midlands, UK — Nottinghamshire": {
+        "bbox":    [-1.05, 52.90, -0.77, 52.99],
+        "notes":   "24 km × 8 km  |  Mixed farmland and managed woodland  |  Low cloud cover",
+        "climate": "Temperate maritime. Growing season April–September. "
+                   "Woodland edge encroachment on agricultural ROW corridors.",
+    },
+    "Hunter Valley, Australia — NSW": {
+        "bbox":    [151.00, -32.85, 151.28, -32.76],
+        "notes":   "25 km × 8 km  |  Eucalyptus scrub and dry sclerophyll forest  |  Post-drought regrowth",
+        "climate": "Southern Hemisphere. April–September is austral autumn/winter — "
+                   "vegetation browning. Eucalyptus that stays green flags as anomalous.",
+    },
+    "Gauteng, South Africa — Johannesburg–Pretoria": {
+        "bbox":    [27.90, -26.00, 28.18, -25.91],
+        "notes":   "25 km × 8 km  |  Highveld grassland  |  Invasive species pressure",
+        "climate": "Southern Hemisphere dry season April–September. "
+                   "Invasive wattle and lantana maintain high NDVI — strong anomaly signal.",
+    },
+    "Dar es Salaam–Morogoro, Tanzania": {
+        "bbox":    [38.20, -7.05, 38.48, -6.96],
+        "notes":   "25 km × 8 km  |  Miombo woodland transition zone  |  TANESCO 220 kV corridor",
+        "climate": "East African dry season April–September. Most vegetation dries out. "
+                   "Riparian forest and invasive acacias stay green — high anomaly confidence.",
+    },
 }
+
+# Default corridor key (used on first load)
+DEFAULT_CORRIDOR_KEY = "Central NC, USA — Durham–Raleigh"
 
 # Fixed pixel dimensions — guarantees all six arrays are the same shape
 IMG_W = 240
@@ -539,8 +576,12 @@ def build_context_string(results):
     anom_in_warning  = 100.0 * af[rf == 3].mean() if (rf == 3).any() else 0.0
     km_thresh_agr    = results['km_thresh_agreement']
 
+    corridor_name = results.get('corridor_name', 'Utility transmission corridor')
+    climate_note  = results.get('climate_note', '')
+
     context = f"""CORRIDOR RISK ANALYSIS SUMMARY
-Study area: Utility transmission corridor, central North Carolina (Durham–Raleigh region)
+Study area: {corridor_name}
+Seasonal context: {climate_note}
 Data: Sentinel-2 NDVI, 100 m resolution, April–September 2023 (6 monthly composites)
 Total pixels analysed: {n:,}
 
@@ -679,13 +720,24 @@ Thin vegetation growing fast toward the ROW is high priority even if it looks fi
 - **Layer 2:** All four algorithms applied to the same pixel arrays
 - **Layer 3:** AI synthesis of algorithm outputs into a prioritised inspection brief
 
-**Study area:** Central NC transmission corridor (Durham–Raleigh region, ~24 km × 8 km).
+**Five pre-defined corridors** span North America, Europe, Australia, Africa, and East Africa.
+Each corridor has a different vegetation type and climate regime — the same four algorithms
+produce different risk patterns depending on local conditions.
         """)
 
-    # --- Study area info ---
+    # --- Corridor selector ---
+    corridor_key = st.selectbox(
+        "Select study corridor",
+        options=list(CORRIDORS.keys()),
+        index=list(CORRIDORS.keys()).index(DEFAULT_CORRIDOR_KEY),
+        key="cr_corridor_key",
+    )
+    corridor = CORRIDORS[corridor_key]
+
     st.info(
-        f"**Study corridor:** {DEFAULT_CORRIDOR['name']}  \n"
-        f"**Area:** {DEFAULT_CORRIDOR['notes']}  \n"
+        f"**Corridor:** {corridor_key}  \n"
+        f"**Area:** {corridor['notes']}  \n"
+        f"**Seasonal context:** {corridor['climate']}  \n"
         f"**Data:** Sentinel-2 NDVI via Google Earth Engine  |  100 m resolution  |  April–September 2023"
     )
 
@@ -727,12 +779,16 @@ Thin vegetation growing fast toward the ROW is high priority even if it looks fi
             st.session_state.cr_context     = None
             st.session_state.cr_ai_text     = None
             st.session_state.cr_pending     = True
+            st.session_state.cr_pending_key = corridor_key   # capture the selected corridor
             st.rerun()
 
     # --- Execute pending run ---
     if st.session_state.get("cr_pending"):
         st.session_state.cr_pending = None
-        bbox_tuple = tuple(DEFAULT_CORRIDOR["bbox"])
+        # Read selected corridor from session state (set when run button was pressed)
+        _selected_key  = st.session_state.get("cr_pending_key", DEFAULT_CORRIDOR_KEY)
+        _selected_corr = CORRIDORS[_selected_key]
+        bbox_tuple     = tuple(_selected_corr["bbox"])
 
         with st.spinner("Fetching Sentinel-2 NDVI composites from GEE (6 months — allow 60–90 seconds)..."):
             ndvi_arrays, labels, err = fetch_ndvi_arrays(bbox_tuple)
@@ -742,6 +798,10 @@ Thin vegetation growing fast toward the ROW is high priority even if it looks fi
         else:
             with st.spinner("Running four ML algorithms..."):
                 results = run_algorithms(ndvi_arrays)
+
+            # Inject corridor metadata so build_context_string() can name the location
+            results['corridor_name'] = _selected_key
+            results['climate_note']  = _selected_corr['climate']
 
             context_str, risk_pcts, risk_slope_means = build_context_string(results)
 
