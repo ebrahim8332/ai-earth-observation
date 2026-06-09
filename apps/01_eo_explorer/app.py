@@ -712,7 +712,29 @@ has shifted across the full period.
 
         section_break()
 
-        # --- SECTION 6: Export ---
+        # --- SECTION 6: Data Quality ---
+        st.subheader("🔍 Data Quality")
+        _ds_info = gee_timeseries.DATASETS[r_ds]
+        _obs     = stats["count"]
+        if _obs >= 100:
+            _ts_conf = "High — large sample. Trend and seasonal estimates are reliable."
+        elif _obs >= 50:
+            _ts_conf = "Moderate — adequate sample. Treat long-term trend slope with care."
+        else:
+            _ts_conf = "Limited — fewer than 50 observations. Trends may not be reliable."
+        st.info(
+            f"**Sensor:** {_ds_info['sensor']}  \n"
+            f"**Spatial resolution:** {_ds_info['resolution']}  \n"
+            f"**Revisit cadence:** {_ds_info['revisit']}  \n"
+            f"**Observations used:** {_obs} data points ({r_start}–{r_end})  \n"
+            f"**Cloud handling:** Pre-composited by Google Earth Engine. "
+            f"Cloud pixels excluded before aggregation. No gaps from cloud cover.  \n"
+            f"**Confidence:** {_ts_conf}"
+        )
+
+        section_break()
+
+        # --- SECTION 7: Export ---
         st.subheader("📥 Export")
         export_df = df[["date", "value"]].copy()
         export_df.columns = ["Date", r_ds]
@@ -2007,7 +2029,29 @@ in the top-right corner of the map.
 
         cd_section_break()
 
-        # --- SECTION 4: Export ---
+        # --- SECTION 4: Data Quality ---
+        st.subheader("🔍 Data Quality")
+        _src1 = st.session_state.get("cd_result_src1", "")
+        _src2 = st.session_state.get("cd_result_src2", "")
+        _both_s2 = "Sentinel-2" in str(_src1) and "Sentinel-2" in str(_src2)
+        _cd_res  = "10 m (Sentinel-2)" if _both_s2 else "250 m (MODIS fallback)"
+        if _both_s2:
+            _cd_conf = "High — both dates used Sentinel-2 at 10 m. Change map resolves field-scale features."
+        else:
+            _cd_conf = ("Moderate — one or both dates used MODIS (250 m). "
+                        "Change map shows regional patterns only. Fine-scale features are not resolved.")
+        st.info(
+            f"**Date 1 source:** {_src1 or 'GEE composite'}  \n"
+            f"**Date 2 source:** {_src2 or 'GEE composite'}  \n"
+            f"**Spatial resolution:** {_cd_res}  \n"
+            f"**Cloud handling:** GEE composites — cloud pixels excluded during aggregation.  \n"
+            f"**Scenes per date:** Multiple scenes composited within ±{gee_change.WINDOW_DAYS} days of each target date.  \n"
+            f"**Confidence:** {_cd_conf}"
+        )
+
+        cd_section_break()
+
+        # --- SECTION 5: Export ---
         st.subheader("📥 Export")
         import pandas as pd
         export_stats = {
@@ -2597,6 +2641,29 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
                 st.caption(f"AI response from **{model_used}**")
             else:
                 st.caption("Showing built-in interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
+
+        em_section_break()
+
+        # --- Data Quality ---
+        st.subheader("🔍 Data Quality")
+        _pc = pass_count if pass_count else 0
+        if _pc >= 7:
+            _em_conf = "High — 7 or more orbital passes. Good spatial coverage for the 7-day window."
+        elif _pc >= 4:
+            _em_conf = "Moderate — 4–6 passes. Some areas may have sparse coverage."
+        else:
+            _em_conf = ("Limited — fewer than 4 passes. Coverage may be patchy. "
+                        "Interpret regional average with caution.")
+        st.info(
+            f"**Sensor:** TROPOMI (Sentinel-5P)  \n"
+            f"**Gas measured:** {cfg.get('label', r_gas)}  \n"
+            f"**Spatial resolution:** ~3.5 × 5.5 km (TROPOMI nadir pixel)  \n"
+            f"**Composite window:** 7-day mosaic centred on {actual_date}  \n"
+            f"**Orbital passes:** {_pc} passes within the window  \n"
+            f"**Cloud handling:** TROPOMI cloud fraction filter applied. "
+            f"Pixels with cloud fraction > 0.5 excluded.  \n"
+            f"**Confidence:** {_em_conf}"
+        )
 
     else:
         st.markdown("---")

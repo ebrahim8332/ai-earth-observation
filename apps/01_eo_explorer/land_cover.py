@@ -1060,6 +1060,27 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
             if model and model != "fallback":
                 st.caption(f"AI response from {model}")
 
+        # --- Data Quality ---
+        st.divider()
+        st.subheader("🔍 Data Quality")
+        _cloud = scene["scene_cloud"]
+        if _cloud <= 5:
+            _lc_conf = "High — very low cloud cover. Classification covers the full scene."
+        elif _cloud <= 15:
+            _lc_conf = "Good — low cloud cover. A small portion of the scene may be affected."
+        else:
+            _lc_conf = ("Moderate — cloud cover above 15%. Some pixels may be misclassified "
+                        "as cloud shadow or bare soil. Consider selecting a cleaner scene.")
+        st.info(
+            f"**Sensor:** Sentinel-2 (Planetary Computer)  \n"
+            f"**Spatial resolution:** 10 m  \n"
+            f"**Scene date:** {scene['scene_date']}  \n"
+            f"**Scenes used:** 1 (single scene, not a composite)  \n"
+            f"**Cloud cover:** {_cloud:.1f}%  \n"
+            f"**Classification method:** K-means (unsupervised) + Random Forest (weakly supervised)  \n"
+            f"**Confidence:** {_lc_conf}"
+        )
+
         # --- Export ---
         st.divider()
         st.subheader("📥 Export")
