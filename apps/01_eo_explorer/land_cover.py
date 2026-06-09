@@ -97,26 +97,26 @@ def _fetch_band(item, band_name, bbox, width, height):
     return None
 
 
-def _fetch_rgb(item, bbox, width, height):
-    """Fetch true-color RGB composite as a uint8 numpy array."""
-    params = [
-        ("collection", "sentinel-2-l2a"),
-        ("item",       item.id),
-        ("assets",     "B04"), ("assets", "B03"), ("assets", "B02"),
-        ("asset_bidx", "B04|1"), ("asset_bidx", "B03|1"), ("asset_bidx", "B02|1"),
-        ("rescale",    "0,3000"), ("rescale", "0,3000"), ("rescale", "0,3000"),
-        ("color_formula", "Gamma RGB 2.2"),
-        ("width",  str(width)),
-        ("height", str(height)),
-        ("bbox",   f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"),
-    ]
-    try:
-        resp = requests.get(PC_RENDER_URL, params=params, timeout=60)
-        if resp.status_code == 200:
-            return np.array(Image.open(BytesIO(resp.content)).convert("RGB"))
-    except Exception:
-        pass
-    return None
+def _build_rgb_from_bands(band_arrays):
+    """Build a true-color uint8 RGB image from already-fetched B04/B03/B02 arrays.
+
+    Uses the same bands the classification uses — no extra API call needed.
+    Applies a simple gamma correction (power 0.5) to brighten the display.
+    Sentinel-2 reflectance values at 0-1 float are typically low (0.05-0.3 for land)
+    so the gamma lift makes the image readable without clipping.
+    """
+    r = band_arrays.get("B04")
+    g = band_arrays.get("B03")
+    b = band_arrays.get("B02")
+    if r is None or g is None or b is None:
+        return None
+
+    # Stack to (H, W, 3), clip to 0-1, apply gamma, convert to uint8
+    rgb = np.stack([r, g, b], axis=-1)
+    rgb = np.clip(rgb, 0, 1)
+    rgb = np.power(rgb, 0.5)          # gamma 0.5 — brightens without blowing out
+    rgb = (rgb * 255).astype(np.uint8)
+    return rgb
 
 
 def fetch_scene(bbox, date_range, max_cloud=10):
@@ -143,10 +143,7 @@ def fetch_scene(bbox, date_range, max_cloud=10):
         item  = items[0]
         h     = _compute_img_height(bbox)
 
-        # Fetch true-color RGB
-        rgb = _fetch_rgb(item, bbox, IMG_WIDTH, h)
-
-        # Fetch five bands
+        # Fetch five bands — RGB is built from these, no separate API call needed
         band_arrays = {}
         for band in BANDS:
             arr = _fetch_band(item, band, bbox, IMG_WIDTH, h)
@@ -155,6 +152,9 @@ def fetch_scene(bbox, date_range, max_cloud=10):
 
         if len(band_arrays) < 5:
             return None, f"Only {len(band_arrays)} of 5 bands returned. Try a different date range."
+
+        # Build true-color RGB from the fetched bands
+        rgb = _build_rgb_from_bands(band_arrays)
 
         # Spectral indices
         def safe_index(a, b):
@@ -225,7 +225,11 @@ def run_kmeans(scene, n_clusters=5):
             "ndbi":    float(ndbi_flat[mask].mean()),
         })
 
-    # Assign land cover labels based on cluster spectral signature
+    # Assign land cover labels based on cluster spectral signature.
+    # Urban threshold is NDBI > 0.15 — matches the Random Forest pseudo-label rule.
+    # NDBI > 0.05 is too loose: arid sandy soil also triggers it, causing the whole
+    # Nile Delta desert to be mis-labelled Urban. 0.15 requires a genuinely high
+    # built-surface signal (concrete, asphalt) to qualify.
     label_map = {}
     for stats in cluster_stats:
         if stats["ndwi"] > 0.05:
@@ -234,7 +238,7 @@ def run_kmeans(scene, n_clusters=5):
             label_map[stats["cluster"]] = "Dense vegetation"
         elif stats["ndvi"] > 0.15:
             label_map[stats["cluster"]] = "Crops / sparse veg"
-        elif stats["ndbi"] > 0.05:
+        elif stats["ndbi"] > 0.15 and stats["ndvi"] < 0.10:
             label_map[stats["cluster"]] = "Urban / built-up"
         else:
             label_map[stats["cluster"]] = "Desert / bare soil"
