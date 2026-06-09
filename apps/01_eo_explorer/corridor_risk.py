@@ -12,6 +12,8 @@ All algorithm logic is ported directly from notebook 07_corridor_risk.ipynb.
 Results are cached in Streamlit session state so switching tabs does not re-run.
 """
 
+import io
+import re
 import time
 import warnings
 warnings.filterwarnings('ignore')
@@ -31,6 +33,9 @@ from io import BytesIO
 
 import folium
 from streamlit_folium import st_folium
+
+from docx import Document
+from docx.shared import Inches, Pt, RGBColor
 
 import config
 import ai_chain
@@ -713,6 +718,175 @@ def build_risk_breakdown_chart(risk_flat, n_pixels):
 
 
 # ---------------------------------------------------------------------------
+# Word document builder — converts AI brief markdown to a formatted .docx
+# ---------------------------------------------------------------------------
+
+def _docx_configure(doc):
+    """Set margins and default font — matches deck-studio-coach style."""
+    section = doc.sections[0]
+    section.top_margin    = Inches(1)
+    section.bottom_margin = Inches(1)
+    section.left_margin   = Inches(1.1)
+    section.right_margin  = Inches(1.1)
+    doc.styles["Normal"].font.name = "Calibri"
+    doc.styles["Normal"].font.size = Pt(11)
+
+
+def _docx_heading(doc, text):
+    """Add a Heading 1 paragraph."""
+    p = doc.add_paragraph(text)
+    p.style = doc.styles["Heading 1"]
+
+
+def _parse_md_table(lines):
+    """Parse a markdown table (with or without separator row) into a list of row lists.
+
+    Returns (headers, rows) where each is a list of cell strings.
+    Returns (None, None) if the block is not a valid table.
+    """
+    table_lines = [l for l in lines if l.strip().startswith("|")]
+    if len(table_lines) < 2:
+        return None, None
+    # Strip separator row (--|-- pattern)
+    data_lines = [l for l in table_lines if not re.match(r"^\s*\|[-| :]+\|\s*$", l)]
+    if not data_lines:
+        return None, None
+    def _split(line):
+        return [c.strip() for c in line.strip().strip("|").split("|")]
+    headers = _split(data_lines[0])
+    rows    = [_split(l) for l in data_lines[1:]]
+    return headers, rows
+
+
+def build_corridor_risk_docx(ai_text, corridor_name, model_name=""):
+    """Convert the AI markdown brief into a formatted Word document.
+
+    Parses the brief line by line:
+      - Lines starting with # / ## → Word headings
+      - Markdown table blocks       → real Word tables
+      - Lines starting with **text** → bold paragraph
+      - Numbered list items (1. ...) → numbered paragraphs
+      - Everything else             → normal paragraph
+
+    Returns bytes ready for st.download_button.
+    """
+    doc = Document()
+    _docx_configure(doc)
+
+    # Title
+    title_para = doc.add_paragraph()
+    run = title_para.add_run("Transmission Corridor Vegetation Encroachment Inspection Brief")
+    run.bold = True
+    run.font.size = Pt(16)
+
+    # Metadata block
+    meta = doc.add_paragraph()
+    meta.add_run("Study corridor: ").bold = True
+    meta.add_run(corridor_name)
+
+    if model_name:
+        meta2 = doc.add_paragraph()
+        meta2.add_run("AI model: ").bold = True
+        meta2.add_run(model_name)
+
+    doc.add_paragraph()  # spacer
+
+    lines = ai_text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # --- Heading 1: lines starting with # (but not ##)
+        if stripped.startswith("## "):
+            _docx_heading(doc, stripped.lstrip("# ").strip())
+            i += 1
+
+        elif stripped.startswith("# "):
+            p = doc.add_paragraph(stripped.lstrip("# ").strip())
+            p.style = doc.styles["Heading 1"]
+            i += 1
+
+        # --- Markdown table: collect all consecutive pipe lines
+        elif stripped.startswith("|"):
+            table_block = []
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                table_block.append(lines[i])
+                i += 1
+            headers, rows = _parse_md_table(table_block)
+            if headers and rows:
+                tbl = doc.add_table(rows=1 + len(rows), cols=len(headers))
+                tbl.style = "Table Grid"
+                # Header row
+                hdr_cells = tbl.rows[0].cells
+                for col_idx, hdr in enumerate(headers):
+                    hdr_cells[col_idx].text = hdr
+                    for run in hdr_cells[col_idx].paragraphs[0].runs:
+                        run.bold = True
+                # Data rows
+                for row_idx, row_data in enumerate(rows):
+                    row_cells = tbl.rows[row_idx + 1].cells
+                    for col_idx, cell_text in enumerate(row_data):
+                        if col_idx < len(row_cells):
+                            row_cells[col_idx].text = cell_text
+                doc.add_paragraph()  # spacer after table
+            else:
+                # Fallback: write as plain text
+                for tl in table_block:
+                    doc.add_paragraph(tl.strip())
+
+        # --- Numbered list item: "1. text", "2. text", etc.
+        elif re.match(r"^\d+\.\s", stripped):
+            p = doc.add_paragraph(style="List Number")
+            # Handle inline bold (**text**)
+            _add_inline_bold(p, stripped[stripped.index(". ") + 2:])
+            i += 1
+
+        # --- Bullet list item
+        elif stripped.startswith("- ") or stripped.startswith("* "):
+            p = doc.add_paragraph(style="List Bullet")
+            _add_inline_bold(p, stripped[2:])
+            i += 1
+
+        # --- Bold standalone line: **some heading**
+        elif stripped.startswith("**") and stripped.endswith("**") and len(stripped) > 4:
+            p = doc.add_paragraph()
+            p.add_run(stripped.strip("*")).bold = True
+            i += 1
+
+        # --- Horizontal rule or blank line
+        elif stripped == "" or stripped.startswith("---"):
+            doc.add_paragraph()
+            i += 1
+
+        # --- Normal paragraph (may contain inline bold)
+        else:
+            if stripped:
+                p = doc.add_paragraph()
+                _add_inline_bold(p, stripped)
+            i += 1
+
+    # Footer
+    footer = doc.add_paragraph()
+    footer.add_run("Generated by EOIL — AI-Native Earth Observation Innovation Lab").italic = True
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _add_inline_bold(paragraph, text):
+    """Add a run to paragraph, rendering **bold** spans correctly."""
+    parts = re.split(r"(\*\*.*?\*\*)", text)
+    for part in parts:
+        if part.startswith("**") and part.endswith("**"):
+            paragraph.add_run(part[2:-2]).bold = True
+        else:
+            paragraph.add_run(part)
+
+
+# ---------------------------------------------------------------------------
 # Main render function — called from app.py
 # ---------------------------------------------------------------------------
 
@@ -1133,18 +1307,36 @@ pixels to be anomalous. Increasing this flags more pixels; decreasing it is stri
                 if model:
                     st.caption(f"AI response from {model}")
 
-            # Download button — brief saved as .md so markdown tables and
-            # headings render properly in VS Code, Notion, or any md viewer.
-            # File name includes the corridor key (spaces replaced with dashes).
+            # Two download buttons side by side.
+            # .md  — for VS Code, Notion, or any markdown viewer (tables render cleanly)
+            # .docx — for email attachments, client reports, Word users
             corridor_label = st.session_state.get("cr_corridor_name", "corridor")
             safe_name = corridor_label.replace(" ", "-").replace(",", "").replace("—", "").strip("-")
-            st.download_button(
-                label="⬇ Download brief (.md)",
-                data=ai_text,
-                file_name=f"corridor-risk-brief-{safe_name}.md",
-                mime="text/markdown",
-                key="cr_download_brief",
-            )
+
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                st.download_button(
+                    label="⬇ Download brief (.md)",
+                    data=ai_text,
+                    file_name=f"corridor-risk-brief-{safe_name}.md",
+                    mime="text/markdown",
+                    key="cr_download_md",
+                    use_container_width=True,
+                )
+            with dl_col2:
+                docx_bytes = build_corridor_risk_docx(
+                    ai_text,
+                    corridor_label,
+                    model_name=st.session_state.get("cr_ai_model", ""),
+                )
+                st.download_button(
+                    label="⬇ Download brief (.docx)",
+                    data=docx_bytes,
+                    file_name=f"corridor-risk-brief-{safe_name}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="cr_download_docx",
+                    use_container_width=True,
+                )
 
         # ===================================================================
         # DATA QUALITY
