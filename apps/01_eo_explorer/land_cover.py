@@ -738,8 +738,10 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
             st.session_state.lc_kmeans   = None
             st.session_state.lc_rf       = None
             st.session_state.lc_ai       = None
+            # TEMP DEBUG: use exact notebook bbox to compare results
+            _debug_bbox = [30.0, 30.2, 31.8, 31.3]
             st.session_state.lc_pending  = {
-                "bbox":       lc_bbox,
+                "bbox":       _debug_bbox,
                 "date_range": date_range,
                 "max_cloud":  lc_max_cloud,
                 "n_clusters": n_clusters,
