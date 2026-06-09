@@ -1060,6 +1060,56 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
             if model and model != "fallback":
                 st.caption(f"AI response from {model}")
 
+        # --- Export ---
+        st.divider()
+        st.subheader("📥 Export")
+
+        import pandas as pd
+        from PIL import Image as PILImage
+        import io
+
+        # Build classification stats table from RF results
+        n_pixels = rf_result["rf_map"].size
+        rows = []
+        for label, count in rf_result["class_counts"].items():
+            if count > 0:
+                rows.append({
+                    "Class":       label,
+                    "Pixels":      count,
+                    "Area_pct":    round(100.0 * count / n_pixels, 2),
+                })
+        export_df  = pd.DataFrame(rows).sort_values("Area_pct", ascending=False)
+        csv_bytes  = export_df.to_csv(index=False).encode()
+        safe_reg   = region.replace(" ", "_").replace(",", "")
+        fname_csv  = f"land_cover_{safe_reg}_{scene['scene_date']}.csv"
+
+        # Build PNG of the RF classified map
+        rf_pil     = PILImage.fromarray(rf_img)
+        png_buffer = io.BytesIO()
+        rf_pil.save(png_buffer, format="PNG")
+        png_bytes  = png_buffer.getvalue()
+        fname_png  = f"land_cover_{safe_reg}_{scene['scene_date']}.png"
+
+        col_exp1, col_exp2 = st.columns(2)
+        with col_exp1:
+            st.download_button(
+                label="⬇️ Download classification stats as CSV",
+                data=csv_bytes,
+                file_name=fname_csv,
+                mime="text/csv",
+                key="lc_export_csv",
+            )
+            st.caption("Class name, pixel count, and area percentage from Random Forest.")
+        with col_exp2:
+            st.download_button(
+                label="⬇️ Download classified map as PNG",
+                data=png_bytes,
+                file_name=fname_png,
+                mime="image/png",
+                key="lc_export_png",
+            )
+            st.caption("Random Forest classification map. Colour-coded by land cover class.")
+
     else:
         st.markdown("---")
         st.markdown(

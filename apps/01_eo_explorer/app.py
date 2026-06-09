@@ -710,6 +710,25 @@ has shifted across the full period.
         if "ts_ai_result" in st.session_state and st.session_state.ts_ai_result:
             st.markdown(st.session_state.ts_ai_result)
 
+        section_break()
+
+        # --- SECTION 6: Export ---
+        st.subheader("📥 Export")
+        export_df = df[["date", "value"]].copy()
+        export_df.columns = ["Date", r_ds]
+        csv_data  = export_df.to_csv(index=False).encode()
+        safe_reg  = r_reg.replace(" ", "_").replace(",", "")
+        safe_ds   = r_ds.replace(" ", "_").replace("/", "-")
+        fname_ts  = f"time_series_{safe_reg}_{safe_ds}_{r_start}_{r_end}.csv"
+        st.download_button(
+            label="⬇️ Download time series as CSV",
+            data=csv_data,
+            file_name=fname_ts,
+            mime="text/csv",
+            key="ts_export_csv",
+        )
+        st.caption(f"{len(export_df)} data points — Date and {r_ds} value columns.")
+
     else:
         # No analysis run yet — show a prompt to get started
         st.markdown("---")
@@ -1985,6 +2004,37 @@ in the top-right corner of the map.
                 st.caption(f"AI response from **{model_used}**")
             else:
                 st.caption("Showing built-in fallback interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
+
+        cd_section_break()
+
+        # --- SECTION 4: Export ---
+        st.subheader("📥 Export")
+        import pandas as pd
+        export_stats = {
+            "Region":              r_reg,
+            "Date 1":              str(r_d1),
+            "Date 2":              str(r_d2),
+            "Area increased km2":  round(stats["area_increased_km2"], 2),
+            "Area decreased km2":  round(stats["area_decreased_km2"], 2),
+            "Area stable km2":     round(stats["area_stable_km2"], 2),
+            "Area total km2":      round(stats["area_total_km2"], 2),
+            "Net change km2":      round(stats["net_change_km2"], 2),
+            "Pct increased":       round(stats["pct_increased"], 2),
+            "Pct decreased":       round(stats["pct_decreased"], 2),
+            "Pct stable":          round(stats["pct_stable"], 2),
+        }
+        cd_df    = pd.DataFrame([export_stats])
+        csv_data = cd_df.to_csv(index=False).encode()
+        safe_reg = r_reg.replace(" ", "_").replace(",", "")
+        fname_cd = f"change_detection_{safe_reg}_{r_d1}_{r_d2}.csv"
+        st.download_button(
+            label="⬇️ Download change statistics as CSV",
+            data=csv_data,
+            file_name=fname_cd,
+            mime="text/csv",
+            key="cd_export_csv",
+        )
+        st.caption("CSV contains area statistics for increased, decreased, and stable vegetation.")
 
     else:
         st.markdown("---")
