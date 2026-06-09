@@ -892,6 +892,7 @@ produce different risk patterns depending on local conditions.
             # Inject corridor metadata so build_context_string() can name the location
             results['corridor_name'] = _selected_key
             results['climate_note']  = _selected_corr['climate']
+            st.session_state.cr_corridor_name = _selected_key   # used for download filename
 
             context_str, risk_pcts, risk_slope_means = build_context_string(results)
 
@@ -1122,10 +1123,28 @@ pixels to be anomalous. Increasing this flags more pixels; decreasing it is stri
                     st.session_state.cr_ai_model = None
 
         if st.session_state.get("cr_ai_text"):
-            st.markdown(st.session_state.cr_ai_text)
-            model = st.session_state.get("cr_ai_model", "")
-            if model:
-                st.caption(f"AI response from {model}")
+            ai_text = st.session_state.cr_ai_text
+            model   = st.session_state.get("cr_ai_model", "")
+
+            # Expander — open by default so first-time users see the brief,
+            # but collapsible so the page does not feel overwhelming on re-runs.
+            with st.expander("📋 AI Risk Brief", expanded=True):
+                st.markdown(ai_text)
+                if model:
+                    st.caption(f"AI response from {model}")
+
+            # Download button — brief saved as .md so markdown tables and
+            # headings render properly in VS Code, Notion, or any md viewer.
+            # File name includes the corridor key (spaces replaced with dashes).
+            corridor_label = st.session_state.get("cr_corridor_name", "corridor")
+            safe_name = corridor_label.replace(" ", "-").replace(",", "").replace("—", "").strip("-")
+            st.download_button(
+                label="⬇ Download brief (.md)",
+                data=ai_text,
+                file_name=f"corridor-risk-brief-{safe_name}.md",
+                mime="text/markdown",
+                key="cr_download_brief",
+            )
 
         # ===================================================================
         # DATA QUALITY
