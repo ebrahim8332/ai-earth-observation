@@ -29,6 +29,9 @@ import matplotlib.colors as mcolors
 from PIL import Image
 from io import BytesIO
 
+import folium
+from streamlit_folium import st_folium
+
 import config
 import ai_chain
 
@@ -740,6 +743,45 @@ produce different risk patterns depending on local conditions.
         f"**Seasonal context:** {corridor['climate']}  \n"
         f"**Data:** Sentinel-2 NDVI via Google Earth Engine  |  100 m resolution  |  April–September 2023"
     )
+
+    # --- Corridor location map ---
+    # Draws the analysis footprint on an interactive map.
+    # Updates immediately when the corridor selectbox changes — no GEE required.
+    west, south, east, north = corridor['bbox']
+    centre_lat = (south + north) / 2
+    centre_lon = (west  + east)  / 2
+
+    m = folium.Map(
+        location=[centre_lat, centre_lon],
+        zoom_start=10,
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri World Imagery',
+    )
+
+    # Draw the corridor bounding box as a rectangle
+    folium.Rectangle(
+        bounds=[[south, west], [north, east]],
+        color='#f7a200',
+        weight=3,
+        fill=True,
+        fill_color='#f7a200',
+        fill_opacity=0.15,
+        tooltip=corridor_key,
+    ).add_to(m)
+
+    # Small crosshair at the centre so the corridor is easy to spot when zoomed out
+    folium.Marker(
+        location=[centre_lat, centre_lon],
+        tooltip=corridor_key,
+        icon=folium.DivIcon(
+            html='<div style="font-size:18px; color:#f7a200; font-weight:bold; '
+                 'text-shadow: 0 0 3px #000;">✦</div>',
+            icon_size=(20, 20),
+            icon_anchor=(10, 10),
+        ),
+    ).add_to(m)
+
+    st_folium(m, height=300, use_container_width=True, returned_objects=[])
 
     # --- Run button ---
     col_btn, col_status = st.columns([1, 3])
