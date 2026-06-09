@@ -47,6 +47,15 @@ from sklearn.preprocessing import StandardScaler
 # Each bbox is [west, south, east, north] in decimal degrees, sized ~25 x 10 km
 # so the 240x90 pixel grid stays at ~100m resolution.
 #
+# IMPORTANT — corridor alignment note:
+# The NC corridor is the only validated study corridor. Its bbox was confirmed
+# to produce clean NDVI results throughout notebook development.
+# The other four corridors are ILLUSTRATIVE. Their bboxes are geographically
+# plausible for the named region and vegetation type, but they were not traced
+# to verified transmission line coordinates. For real client work, derive the
+# bbox from actual line geometry (OpenStreetMap power=line, Global Energy
+# Monitor, or utility GIS portals) and buffer by the ROW width.
+#
 # Seasonal note for Tanzania: April–September is the dry season in East Africa.
 # NDVI slopes will be mostly negative (vegetation drying out). Vegetation that
 # stays green through the dry season — water-dependent species, invasive acacias —
@@ -60,25 +69,25 @@ CORRIDORS = {
     },
     "East Midlands, UK — Nottinghamshire": {
         "bbox":    [-1.05, 52.90, -0.77, 52.99],
-        "notes":   "24 km × 8 km  |  Mixed farmland and managed woodland  |  Low cloud cover",
+        "notes":   "24 km × 8 km  |  Mixed farmland and managed woodland  |  Illustrative corridor",
         "climate": "Temperate maritime. Growing season April–September. "
                    "Woodland edge encroachment on agricultural ROW corridors.",
     },
     "Hunter Valley, Australia — NSW": {
         "bbox":    [151.00, -32.85, 151.28, -32.76],
-        "notes":   "25 km × 8 km  |  Eucalyptus scrub and dry sclerophyll forest  |  Post-drought regrowth",
+        "notes":   "25 km × 8 km  |  Eucalyptus scrub and dry sclerophyll forest  |  Illustrative corridor",
         "climate": "Southern Hemisphere. April–September is austral autumn/winter — "
                    "vegetation browning. Eucalyptus that stays green flags as anomalous.",
     },
     "Gauteng, South Africa — Johannesburg–Pretoria": {
         "bbox":    [27.90, -26.00, 28.18, -25.91],
-        "notes":   "25 km × 8 km  |  Highveld grassland  |  Invasive species pressure",
+        "notes":   "25 km × 8 km  |  Highveld grassland  |  Illustrative corridor",
         "climate": "Southern Hemisphere dry season April–September. "
                    "Invasive wattle and lantana maintain high NDVI — strong anomaly signal.",
     },
     "Dar es Salaam–Morogoro, Tanzania": {
         "bbox":    [38.20, -7.05, 38.48, -6.96],
-        "notes":   "25 km × 8 km  |  Miombo woodland transition zone  |  TANESCO 220 kV corridor",
+        "notes":   "25 km × 8 km  |  Miombo woodland transition zone  |  Illustrative corridor",
         "climate": "East African dry season April–September. Most vegetation dries out. "
                    "Riparian forest and invasive acacias stay green — high anomaly confidence.",
     },
@@ -741,7 +750,8 @@ produce different risk patterns depending on local conditions.
         f"**Corridor:** {corridor_key}  \n"
         f"**Area:** {corridor['notes']}  \n"
         f"**Seasonal context:** {corridor['climate']}  \n"
-        f"**Data:** Sentinel-2 NDVI via Google Earth Engine  |  100 m resolution  |  April–September 2023"
+        f"**Data:** Sentinel-2 NDVI via Google Earth Engine  |  100 m resolution  |  April–September 2023  \n"
+        f"{'⚠️ Illustrative corridor — bbox not traced to verified line geometry. For production use, derive from OpenStreetMap power lines or utility GIS data.' if corridor_key != DEFAULT_CORRIDOR_KEY else '✅ Validated study corridor — bbox confirmed through notebook development.'}"
     )
 
     # --- Corridor location map ---

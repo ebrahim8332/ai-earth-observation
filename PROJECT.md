@@ -8,8 +8,8 @@
 ## Current Status
 
 **Phase:** Arc-based program (revised after Day 12)
-**Last completed:** Arc 1 — Land Cover Intelligence. K-means clustering and Random Forest on Sentinel-2 via Planetary Computer. Notebook 06_land_cover_classification.ipynb complete. Portal module land_cover.py added (v1.9).
-**Next session:** Arc 2 — Corridor and Vegetation Risk
+**Last completed:** Arc 2 complete — notebook run clean end-to-end, portal module live.
+**Next session:** Arc 3 — Flood Detection and Impact Mapping.
 
 ---
 
@@ -50,45 +50,53 @@ All modules deployed at https://eoil-explorer.streamlit.app
 | Module | Added | Status |
 |--------|-------|--------|
 | Welcome Panel | Day 7 | Live |
-| Spectral Explorer | Day 3 | Live |
+| Spectral Explorer | Day 3 | Live — enhancements pending |
 | Time Series Explorer | Day 6 | Live |
 | SAR Explorer | Day 7 | Live |
 | Change Detection | Day 9 | Live |
 | AI Imagery Interpreter | Day 10 | Live |
 | Emissions Explorer | Day 12 | Live |
 | Land Cover Intelligence | Arc 1 | Live |
+| Corridor Risk Intelligence | Arc 2 | Live |
+
+---
+
+## Pre-Arc 2 Enhancements — Existing Modules
+
+These improvements are drawn from the backlog review. They complete the existing
+modules before new arcs begin. All are additions to live modules, not new modules.
+
+### Enhancement 1: Spectral Explorer — Additional Indices
+**Module:** spectral_explorer.py
+**What:** Add five spectral indices as new band combination presets.
+- NDMI: Normalized Difference Moisture Index — (B08 - B11) / (B08 + B11). Vegetation water stress.
+- NBR: Normalized Burn Ratio — (B08 - B12) / (B08 + B12). Burn severity and fire scars.
+- SAVI: Soil-Adjusted Vegetation Index — ((B08 - B04) / (B08 + B04 + 0.5)) * 1.5. Vegetation in sparse cover.
+- EVI: Enhanced Vegetation Index — 2.5 * (B08 - B04) / (B08 + 6*B04 - 7.5*B02 + 1). Better than NDVI in dense canopy.
+- BSI: Bare Soil Index — ((B11 + B04) - (B08 + B02)) / ((B11 + B04) + (B08 + B02)). Bare and exposed soil.
+**Why:** Expands analytical range of an already-live module. Each index costs one line of computation.
+**Status:** Pending
+
+### Enhancement 2: Export Layer — Three Modules
+**Modules:** land_cover.py, gee_change.py, gee_timeseries.py
+**What:** Add download buttons to three modules.
+- Land Cover Intelligence: Download classification stats as CSV. Download classified map as PNG.
+- Change Detection: Download change statistics (area increased, decreased, stable) as CSV.
+- Time Series Explorer: Download index time series (date, value) as CSV.
+**Why:** Makes portal outputs usable outside the browser. Demonstrates a complete workflow.
+**Status:** Complete. Deployed.
+
+### Enhancement 3: Confidence and Data Quality Note — All analytical modules
+**Modules:** land_cover.py, gee_change.py, gee_timeseries.py, methane_explorer.py
+**What:** Add a small structured data quality block near each Layer 3 output showing:
+cloud cover %, number of valid scenes used, spatial resolution, and a plain-English
+confidence statement.
+**Why:** Every output should communicate its own limitations. Honest and professional.
+**Status:** Complete. Deployed.
 
 ---
 
 ## Arc Plan
-
-### Arc 1 — Optical Intelligence and Land Cover
-
-**Goal:** Deep understanding of multispectral classification.
-Compare unsupervised and supervised approaches on the same scene.
-Introduce SAM as a foundation model for segmentation.
-
-**Data:** Sentinel-2 via Planetary Computer or GEE
-
-**Layer 2 algorithms:**
-- K-means clustering on NDVI and spectral bands
-- Random Forest classifier trained on labeled pixels
-- SAM (Segment Anything Model) for object segmentation
-- Compare all three outputs on the same scene
-
-**Layer 3:** Groq interprets classification map. Compares methods. Flags discrepancies.
-
-**Notebook:** Land cover classification — K-means vs Random Forest vs SAM
-**Portal module:** Land Cover Intelligence
-
-**Key concepts:**
-- Supervised vs unsupervised classification
-- What a foundation model is and how it differs from task-specific models
-- Why three methods on the same data teach more than one
-
-**Status:** Complete — notebook 06_land_cover_classification.ipynb, portal module land_cover.py, app.py v1.9. SAM reserved for Arc 5.
-
----
 
 ### Arc 2 — Corridor and Vegetation Risk
 
@@ -103,8 +111,9 @@ Move beyond a snapshot to a growth trend and prioritised action output.
 - Linear regression per pixel across 6 time steps for growth trend
 - Isolation Forest to flag anomalous growth zones
 
-**Layer 3:** Groq synthesises all three algorithm outputs into a prioritised
-risk table: critical, warning, monitor. Recommends inspection sequencing.
+**Layer 3:** Groq synthesises all algorithm outputs into a prioritised risk table:
+critical, warning, monitor. Includes inspection priority scoring per segment
+(weighted: change magnitude, proximity to asset, persistence, confidence).
 
 **Notebook:** Vegetation encroachment — multi-algorithm corridor analysis
 **Portal module:** Corridor Risk Intelligence
@@ -113,41 +122,109 @@ risk table: critical, warning, monitor. Recommends inspection sequencing.
 - Unsupervised clustering vs rule-based thresholding
 - Pixel-level trend analysis over time
 - Isolation Forest for anomaly detection without labeled data
+- Inspection priority scoring: converting satellite findings into ranked action
 - How three algorithms on the same data produce a richer risk picture than one
 
-**Status:** Next to build
+**Status:** Complete. Notebook and portal module live. Deployed to https://eoil-explorer.streamlit.app
+
+**Corridor alignment note:**
+The NC corridor is the only validated bbox. The other four (UK, Australia, South Africa, Tanzania)
+are illustrative — geographically plausible for the named region but not traced to verified
+transmission line coordinates. For production use, derive bboxes from real line geometry:
+OpenStreetMap (power=line via Overpass Turbo), Global Energy Monitor, or utility GIS portals.
+The UI and code comments now reflect this distinction.
 
 ---
 
-### Arc 3 — Radar and Ground Movement
+### Arc 3 — Flood Detection and Impact Mapping
 
-**Goal:** Understand SAR coherence and use it to detect ground movement.
-Introduce autoencoders as a neural network approach to anomaly detection.
+**Goal:** Detect flood extent using Sentinel-1 SAR and optical imagery.
+Demonstrate that SAR is practically useful, not just educational.
 
-**Data:** Sentinel-1 GRD and SLC via ASF Data Search or GEE
+**Data:** Sentinel-1 SAR before/after via GEE, Sentinel-2 water indices, SRTM DEM
 
 **Layer 2 algorithms:**
-- PCA on multi-date SAR coherence stack to find change dimensions
-- Autoencoder trained on baseline coherence to flag reconstruction errors
-- Statistical threshold comparison against autoencoder output
+- SAR backscatter change detection (before vs after)
+- NDWI thresholding on Sentinel-2 where cloud-free
+- Slope masking from DEM to exclude non-flood areas
+- Permanent water masking from Global Surface Water
 
-**Layer 3:** Groq interprets coherence loss patterns. Identifies infrastructure
-risk zones. Explains what InSAR coherence measures and why it detects subsidence.
+**Layer 3:** Groq generates impact summary: estimated flood extent, affected area,
+infrastructure exposure, recommended response actions.
 
-**Notebook:** SAR coherence and ground movement — PCA and autoencoder approach
-**Portal module:** Ground Movement and Subsidence
+**Notebook:** Flood detection — SAR and optical fusion
+**Portal module:** Flood Intelligence
 
 **Key concepts:**
-- What SAR coherence is and how it measures ground stability
-- PCA as a dimensionality reduction tool on multi-date stacks
-- What an autoencoder is: compress, reconstruct, flag what reconstructs poorly
-- Why neural network anomaly detection differs from statistical thresholding
+- Why SAR detects floods through clouds when optical sensors cannot
+- Water masking: separating flood water from permanent water bodies
+- DEM slope masking: why flat areas flood, steep areas do not
+- Fusing two sensor types for better results than either alone
 
 **Status:** Planned
 
 ---
 
-### Arc 4 — LiDAR Intelligence
+### Arc 4 — Burn Severity and Wildfire Analysis
+
+**Goal:** Detect wildfire burn scars and estimate severity using NBR and dNBR.
+
+**Data:** Sentinel-2 and Landsat via Planetary Computer or GEE, FIRMS fire alerts via GEE
+
+**Layer 2 algorithms:**
+- NBR: Normalized Burn Ratio from pre-fire scene
+- dNBR: Differenced NBR between pre- and post-fire scenes
+- Severity classification: unburned, low, moderate, high, very high severity
+- FIRMS active fire point overlay for context
+
+**Layer 3:** Groq explains severity classes, estimates recovery timeline,
+flags areas requiring field inspection.
+
+**Notebook:** Burn severity — NBR and dNBR on Sentinel-2
+**Portal module:** Burn Severity Intelligence
+**Note:** NBR added to Spectral Explorer as a preset in the Pre-Arc 2 enhancements.
+
+**Key concepts:**
+- What NBR measures and why shortwave infrared responds to fire damage
+- Differenced index: why change between two dates matters more than absolute value
+- Severity classes and what they mean for vegetation recovery
+- FIRMS fire data: what it is, how it is produced, its limitations
+
+**Status:** Planned
+
+---
+
+### Arc 5 — Urban Growth and Load Intelligence
+
+**Goal:** Detect new development and urban expansion as a proxy for utility load growth.
+
+**Data:** Sentinel-2 NDBI change via GEE or Planetary Computer, VIIRS night lights via GEE,
+Dynamic World land cover via GEE
+
+**Layer 2 algorithms:**
+- NDBI change detection between two dates
+- VIIRS night-light trend analysis per location
+- Dynamic World land-cover transition classification (from → to class)
+- Isolation Forest to flag abnormal growth zones
+
+**Layer 3:** Groq translates geospatial findings into utility planning language:
+new-development hotspots, growth rate, candidate areas for infrastructure planning,
+load growth implications.
+
+**Notebook:** Urban growth — NDBI change, night lights, Dynamic World
+**Portal module:** Urban Growth Intelligence
+
+**Key concepts:**
+- NDBI change vs single-date NDBI: why temporal comparison is more reliable
+- VIIRS night lights as a proxy for economic activity and load
+- Dynamic World: near-real-time land cover from Google
+- Translating remote sensing output into infrastructure planning language
+
+**Status:** Planned
+
+---
+
+### Arc 6 — LiDAR Clearance Intelligence
 
 **Goal:** Work with real 3D point cloud data. Derive canopy height, ground model,
 and clearance distances. Use AI for precision classification at the point level.
@@ -176,7 +253,7 @@ inspection priority. Explains what LiDAR sees that satellites cannot.
 
 ---
 
-### Arc 5 — Foundation Models
+### Arc 7 — Foundation Models
 
 **Goal:** Understand what geospatial foundation models are, how they work,
 and when they outperform task-specific models.
@@ -204,7 +281,7 @@ methods. Explains when to use a foundation model vs a task-specific classifier.
 
 ---
 
-### Arc 6 — Time Series and Anomaly Detection
+### Arc 8 — Time Series Anomaly Intelligence
 
 **Goal:** Compare three anomaly detection approaches on the same time series data.
 Understand when each method is appropriate and why they flag different events.
@@ -233,7 +310,7 @@ sensor error. Recommends follow-up action per flagged event.
 
 ---
 
-### Arc 7 — Hyperspectral Intelligence
+### Arc 9 — Hyperspectral Intelligence
 
 **Goal:** Work with real hyperspectral data. Understand spectral signatures.
 Use dimensionality reduction and clustering to identify materials and anomalies.
@@ -262,7 +339,7 @@ hyperspectral data can identify things multispectral cannot.
 
 ---
 
-### Arc 8 — Atmospheric Intelligence
+### Arc 10 — Atmospheric Anomaly Intelligence
 
 **Goal:** Extend the existing Emissions Explorer with real anomaly detection
 and trend analysis. Move from a visualisation module to an analytical one.
@@ -289,19 +366,22 @@ source types. Flags trend direction and rate of change per region.
 
 ---
 
-### Arc 9 — Capstone: Utility Intelligence Brief
+### Arc 11 — Capstone: Utility Intelligence Brief
 
 **Goal:** Synthesise outputs from all arcs into one decision-ready brief.
 Demonstrate the full three-layer architecture operating end to end.
+Produce an AI-generated executive report suitable for a utility client.
 
-**Inputs:** Real outputs from Arc 2 (vegetation risk), Arc 3 (ground movement),
-Arc 4 (LiDAR clearance), Arc 6 (time series anomalies), Arc 8 (atmospheric).
+**Inputs:** Real outputs from Arc 2 (vegetation risk), Arc 3 (flood),
+Arc 5 (urban growth), Arc 8 (time series anomalies), Arc 10 (atmospheric).
 
 **Layer 2:** Aggregates risk scores across layers. Weights by severity.
 Produces a structured risk summary as a data object, not a narrative.
 
 **Layer 3:** Groq receives the structured risk object and writes a one-page
-executive brief. Every claim in the brief is traceable to a Layer 2 output.
+executive brief. Includes: findings, confidence level, recommended actions,
+limitations. Every claim traceable to a Layer 2 output.
+Includes CSV and GeoJSON export of all flagged zones.
 
 **Portal module:** Utility Intelligence Brief
 
@@ -309,6 +389,7 @@ executive brief. Every claim in the brief is traceable to a Layer 2 output.
 - AI as a synthesis layer: ML finds, AI explains, humans decide
 - Why the brief is only as strong as the inputs feeding it
 - What a decision-ready output looks like vs a data display
+- Uncertainty and confidence communication in executive language
 
 **Status:** Planned
 
@@ -330,12 +411,13 @@ executive brief. Every claim in the brief is traceable to a Layer 2 output.
 | Group | Status |
 |-------|--------|
 | Core (streamlit, folium, groq, etc.) | Active |
+| scikit-learn | Active |
 | Raster (rasterio, rioxarray, xarray, odc-stac) | Commented out |
 | GEE (earthengine-api, geemap) | Commented out |
-| SAM (segment-anything) | Commented out — activate for Arc 1 and Arc 5 |
-| LiDAR (laspy, open3d) | Commented out — activate for Arc 4 |
-| Hyperspectral (netCDF4, h5py, spectral) | Commented out — activate for Arc 7 |
-| Deep learning (torch, scikit-learn) | Not yet added — activate for Arc 3 and Arc 6 |
+| SAM (segment-anything) | Commented out — activate for Arc 7 |
+| LiDAR (laspy, open3d) | Commented out — activate for Arc 6 |
+| Hyperspectral (netCDF4, h5py, spectral) | Commented out — activate for Arc 9 |
+| Deep learning (torch) | Not yet added — activate for Arc 8 |
 
 ---
 
@@ -344,16 +426,23 @@ executive brief. Every claim in the brief is traceable to a Layer 2 output.
 - GEE credentials: service account JSON in apps/01_eo_explorer/.streamlit/secrets.toml (local, gitignored)
 - Groq API key: console.groq.com
 - Gemini API key: aistudio.google.com
-- NASA Earthdata account: required for EMIT data in Arc 7. Register free at urs.earthdata.nasa.gov
-- ASF account: required for raw Sentinel-1 SLC data in Arc 3. Register free at search.asf.alaska.edu
+- NASA Earthdata account: required for EMIT data in Arc 9. Register free at urs.earthdata.nasa.gov
+- ASF account: required for raw Sentinel-1 SLC data. Register free at search.asf.alaska.edu
 - OpenTopography: no account required for most USGS 3DEP datasets
+- Planetary Computer: intermittent timeouts on free tier. Retry logic added to land_cover.py,
+  spectral_explorer.py, and notebook Cell 3.
 
 ---
 
-## Backlog — Carry Forward
+## Backlog
 
 - SAR Explorer: "Port of Rotterdam" geocodes inland. Map picker solves this for manual use.
-- Time Series Explorer: EVI, NDWI, Burned Area added Day 8. Tooltip for index definitions still pending.
+- Time Series Explorer: tooltip for index definitions still pending.
+- Spectral Explorer: B12 band not currently fetched — needed for NBR. Add to fetch list in Pre-Arc 2 work.
+- Corridor Risk: four illustrative corridors (UK, Australia, South Africa, Tanzania) need bboxes
+  traced to verified transmission line geometry. Sources: OpenStreetMap Overpass Turbo (power=line),
+  Global Energy Monitor, individual utility GIS portals. NC corridor is already validated.
+- Corridor Risk: free-form region search planned (geocoder text input + map picker). Deferred to future session.
 
 ---
 
@@ -365,7 +454,18 @@ executive brief. Every claim in the brief is traceable to a Layer 2 output.
 - [x] Day 11: Shared map picker — map_picker.py, all five modules wired
 - [x] Day 12: Emissions Explorer — TROPOMI CH4/NO2/CO/SO2 via GEE
 - [x] Arc 1: Land Cover Intelligence — notebook + portal module complete (v1.9)
-- [ ] Arc 2: Corridor and Vegetation Risk — next session
+- [x] Backlog review: 25 features assessed, plan revised, arcs 2-11 defined
+- [x] Pre-Arc 2: Module enhancements — spectral indices, export layer, confidence notes
+- [x] Arc 2: Corridor and Vegetation Risk — notebook + portal module complete, live
+- [ ] Arc 3: Flood Detection and Impact Mapping
+- [ ] Arc 4: Burn Severity and Wildfire Analysis
+- [ ] Arc 5: Urban Growth and Load Intelligence
+- [ ] Arc 6: LiDAR Clearance Intelligence
+- [ ] Arc 7: Foundation Models
+- [ ] Arc 8: Time Series Anomaly Intelligence
+- [ ] Arc 9: Hyperspectral Intelligence
+- [ ] Arc 10: Atmospheric Anomaly Intelligence
+- [ ] Arc 11: Capstone — Utility Intelligence Brief
 
 ---
 
