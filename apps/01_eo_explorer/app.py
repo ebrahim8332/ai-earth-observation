@@ -2369,6 +2369,255 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
     st.stop()
 
 # ---------------------------------------------------------------------------
+# MODULE 6 — Emissions Explorer helpers (Word document builder)
+# ---------------------------------------------------------------------------
+
+def _em_static_map_bytes(bbox):
+    """Render a simple bounding-box map as PNG bytes using matplotlib.
+
+    bbox is (min_lon, min_lat, max_lon, max_lat).
+    Returns PNG bytes for embedding in the Word document.
+    """
+    import io as _io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+
+    min_lon, min_lat, max_lon, max_lat = bbox
+    pad_lon = max((max_lon - min_lon) * 0.3, 0.5)
+    pad_lat = max((max_lat - min_lat) * 0.3, 0.5)
+
+    fig, ax = plt.subplots(figsize=(5, 3.5))
+    ax.set_facecolor("#eaf2f8")
+    fig.patch.set_facecolor("#f8fbfd")
+
+    # Region rectangle
+    rect = mpatches.FancyBboxPatch(
+        (min_lon, min_lat),
+        max_lon - min_lon,
+        max_lat - min_lat,
+        boxstyle="square,pad=0",
+        linewidth=2,
+        edgecolor="#2471a3",
+        facecolor="#aed6f1",
+        alpha=0.6,
+    )
+    ax.add_patch(rect)
+
+    # Centre marker
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    ax.plot(cx, cy, "o", color="#1a5276", markersize=6, zorder=5)
+
+    # Axis limits with padding
+    ax.set_xlim(min_lon - pad_lon, max_lon + pad_lon)
+    ax.set_ylim(min_lat - pad_lat, max_lat + pad_lat)
+
+    ax.set_xlabel("Longitude", fontsize=8)
+    ax.set_ylabel("Latitude", fontsize=8)
+    ax.tick_params(labelsize=7)
+    ax.grid(True, linestyle="--", alpha=0.4)
+    ax.set_title("Analysis region", fontsize=9, pad=6)
+
+    # Corner coordinate labels
+    ax.annotate(
+        f"{min_lat:.2f}°N, {min_lon:.2f}°E",
+        xy=(min_lon, min_lat), xytext=(4, 4),
+        textcoords="offset points", fontsize=6, color="#1a5276"
+    )
+    ax.annotate(
+        f"{max_lat:.2f}°N, {max_lon:.2f}°E",
+        xy=(max_lon, max_lat), xytext=(-4, -8),
+        textcoords="offset points", fontsize=6, color="#1a5276", ha="right"
+    )
+
+    buf = _io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format="png", dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+def _em_add_inline_bold(paragraph, text):
+    """Add runs to a Word paragraph, honouring **bold** spans."""
+    import re as _re
+    parts = _re.split(r"(\*\*.*?\*\*)", text)
+    for part in parts:
+        if part.startswith("**") and part.endswith("**"):
+            paragraph.add_run(part[2:-2]).bold = True
+        else:
+            paragraph.add_run(part)
+
+
+def build_emissions_docx(ai_text, gas_name, region, actual_date,
+                          mean_val, pass_count, disp_unit, conf_string,
+                          model_name="", bbox=None):
+    """Build a Word document for the Emissions Explorer result.
+
+    Sections:
+      1. Title and metadata
+      2. Statistics block
+      3. Region map (matplotlib bounding-box figure)
+      4. AI Interpretation (markdown → Word formatting)
+
+    Returns bytes ready for st.download_button.
+    """
+    import io as _io
+    import re as _re
+    from docx import Document
+    from docx.shared import Inches, Pt
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    doc = Document()
+
+    # Margins and font
+    section = doc.sections[0]
+    section.top_margin    = Inches(1)
+    section.bottom_margin = Inches(1)
+    section.left_margin   = Inches(1.1)
+    section.right_margin  = Inches(1.1)
+    doc.styles["Normal"].font.name = "Calibri"
+    doc.styles["Normal"].font.size = Pt(11)
+
+    # ---- Title ----
+    title_para = doc.add_paragraph()
+    run = title_para.add_run("Emissions Intelligence Report")
+    run.bold = True
+    run.font.size = Pt(16)
+
+    # ---- Metadata block ----
+    for label, value in [
+        ("Gas measured:", gas_name),
+        ("Region:", region),
+        ("Composite date:", actual_date),
+        ("AI model:", model_name or "Built-in interpretation"),
+    ]:
+        p = doc.add_paragraph()
+        p.add_run(label + " ").bold = True
+        p.add_run(value)
+
+    doc.add_paragraph()  # spacer
+
+    # ---- Statistics section ----
+    h = doc.add_paragraph("Statistics")
+    h.style = doc.styles["Heading 1"]
+
+    val_str = f"{mean_val:.2f} {disp_unit}" if mean_val is not None else "No valid pixels"
+    stats_rows = [
+        ("Regional mean concentration", val_str),
+        ("Orbital passes (7-day window)", str(pass_count) if pass_count else "0"),
+        ("Data confidence", conf_string),
+        ("Sensor", "TROPOMI (Sentinel-5P)"),
+        ("Spatial resolution", "~3.5 × 5.5 km"),
+    ]
+    tbl = doc.add_table(rows=len(stats_rows), cols=2)
+    tbl.style = "Table Grid"
+    for r_idx, (lbl, val) in enumerate(stats_rows):
+        cells = tbl.rows[r_idx].cells
+        cells[0].text = lbl
+        for run in cells[0].paragraphs[0].runs:
+            run.bold = True
+        cells[1].text = val
+
+    doc.add_paragraph()  # spacer
+
+    # ---- Region map ----
+    if bbox and len(bbox) == 4:
+        h2 = doc.add_paragraph("Region Map")
+        h2.style = doc.styles["Heading 1"]
+        try:
+            png_bytes = _em_static_map_bytes(bbox)
+            img_buf = _io.BytesIO(png_bytes)
+            doc.add_picture(img_buf, width=Inches(4.5))
+            doc.add_paragraph()
+        except Exception:
+            doc.add_paragraph("[Map could not be generated]")
+
+    # ---- AI Interpretation ----
+    h3 = doc.add_paragraph("AI Interpretation")
+    h3.style = doc.styles["Heading 1"]
+
+    if ai_text:
+        lines = ai_text.splitlines()
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            if stripped.startswith("## ") or stripped.startswith("# "):
+                p = doc.add_paragraph(stripped.lstrip("# ").strip())
+                p.style = doc.styles["Heading 1"]
+                i += 1
+
+            elif stripped.startswith("|"):
+                block = []
+                while i < len(lines) and lines[i].strip().startswith("|"):
+                    block.append(lines[i])
+                    i += 1
+                data_lines = [l for l in block if not _re.match(r"^\s*\|[-| :]+\|\s*$", l)]
+                if len(data_lines) >= 2:
+                    def _split(ln):
+                        return [c.strip() for c in ln.strip().strip("|").split("|")]
+                    headers = _split(data_lines[0])
+                    rows_data = [_split(l) for l in data_lines[1:]]
+                    t = doc.add_table(rows=1 + len(rows_data), cols=len(headers))
+                    t.style = "Table Grid"
+                    hdr_cells = t.rows[0].cells
+                    for ci, hdr in enumerate(headers):
+                        hdr_cells[ci].text = hdr
+                        for run in hdr_cells[ci].paragraphs[0].runs:
+                            run.bold = True
+                    for ri, rd in enumerate(rows_data):
+                        rc = t.rows[ri + 1].cells
+                        for ci, ct in enumerate(rd):
+                            if ci < len(rc):
+                                rc[ci].text = ct
+                    doc.add_paragraph()
+                else:
+                    for bl in block:
+                        doc.add_paragraph(bl.strip())
+
+            elif _re.match(r"^\d+\.\s", stripped):
+                p = doc.add_paragraph(style="List Number")
+                _em_add_inline_bold(p, stripped[stripped.index(". ") + 2:])
+                i += 1
+
+            elif stripped.startswith("- ") or stripped.startswith("* "):
+                p = doc.add_paragraph(style="List Bullet")
+                _em_add_inline_bold(p, stripped[2:])
+                i += 1
+
+            elif stripped.startswith("**") and stripped.endswith("**") and len(stripped) > 4:
+                p = doc.add_paragraph()
+                p.add_run(stripped.strip("*")).bold = True
+                i += 1
+
+            elif stripped == "" or stripped.startswith("---"):
+                doc.add_paragraph()
+                i += 1
+
+            else:
+                if stripped:
+                    p = doc.add_paragraph()
+                    _em_add_inline_bold(p, stripped)
+                i += 1
+    else:
+        doc.add_paragraph("No AI interpretation available.")
+
+    # ---- Footer ----
+    footer = doc.add_paragraph()
+    footer.add_run("Generated by EOIL — AI-Native Earth Observation Innovation Lab").italic = True
+
+    buf = _io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
 # MODULE 6 — Emissions Explorer (TROPOMI Sentinel-5P atmospheric gases)
 # ---------------------------------------------------------------------------
 
@@ -2504,6 +2753,7 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
         ("em_map",            None), ("em_mean_val",       None),
         ("em_actual_date",    None), ("em_pass_count",     None),
         ("em_result_region",  None), ("em_result_gas",     None),
+        ("em_result_bbox",    None),
         ("em_ai_result",      None), ("em_ai_model",       None),
     ]:
         if _k not in st.session_state:
@@ -2559,6 +2809,7 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
             st.session_state.em_pass_count   = pass_count
             st.session_state.em_result_region = p["region"]
             st.session_state.em_result_gas    = p["gas"]
+            st.session_state.em_result_bbox   = p["bbox"]
             st.success(
                 f"Data loaded — {p['gas']} over {p['region']} "
                 f"(7-day window: {actual_date}, {pass_count} orbital passes)."
@@ -2636,12 +2887,61 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
                 st.session_state.em_ai_model  = model_used
 
         if st.session_state.get("em_ai_result"):
-            st.markdown(st.session_state.em_ai_result)
-            model_used = st.session_state.get("em_ai_model")
-            if model_used:
-                st.caption(f"AI response from **{model_used}**")
+            with st.expander("📋 AI Interpretation", expanded=True):
+                st.markdown(st.session_state.em_ai_result)
+                model_used = st.session_state.get("em_ai_model")
+                if model_used:
+                    st.caption(f"AI response from **{model_used}**")
+                else:
+                    st.caption("Showing built-in interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
+
+            # Download buttons
+            _em_ai_text   = st.session_state.em_ai_result
+            _em_model     = st.session_state.get("em_ai_model", "")
+            _em_bbox      = st.session_state.get("em_result_bbox")
+            _em_pc        = pass_count if pass_count else 0
+            if _em_pc >= 7:
+                _em_conf_str = "High"
+            elif _em_pc >= 4:
+                _em_conf_str = "Moderate"
             else:
-                st.caption("Showing built-in interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
+                _em_conf_str = "Limited"
+            _em_scaled_val = (mean_val * disp_scale) if mean_val is not None else None
+
+            _em_filename = (
+                r_gas.split("(")[-1].rstrip(")").strip().lower().replace(" ", "_")
+                + "_" + r_reg.lower().replace(" ", "_").replace(",", "")[:30]
+            )
+
+            _dc1, _dc2 = st.columns([1, 1])
+            with _dc1:
+                st.download_button(
+                    label="⬇ Download as Markdown",
+                    data=_em_ai_text,
+                    file_name=f"emissions_{_em_filename}.md",
+                    mime="text/markdown",
+                    key="em_dl_md",
+                )
+            with _dc2:
+                _docx_bytes = build_emissions_docx(
+                    ai_text=_em_ai_text,
+                    gas_name=r_gas,
+                    region=r_reg,
+                    actual_date=actual_date,
+                    mean_val=_em_scaled_val,
+                    pass_count=_em_pc,
+                    disp_unit=disp_unit,
+                    conf_string=_em_conf_str,
+                    model_name=_em_model,
+                    bbox=_em_bbox,
+                )
+                st.download_button(
+                    label="⬇ Download as Word (.docx)",
+                    data=_docx_bytes,
+                    file_name=f"emissions_{_em_filename}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="em_dl_docx",
+                )
 
         em_section_break()
 
