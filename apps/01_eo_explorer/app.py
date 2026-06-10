@@ -2569,9 +2569,9 @@ def _em_combined_map_bytes(thumb_bytes, bbox, region_name="", gas_cfg=None):
         sm.set_array([])
 
         cbar = fig.colorbar(sm, ax=ax, orientation="horizontal",
-                            fraction=0.04, pad=0.02, aspect=30)
-        cbar.set_label(display_unit, fontsize=7.5, color="#333333")
-        cbar.ax.tick_params(labelsize=7, colors="#333333")
+                            fraction=0.025, pad=0.01, aspect=50, shrink=0.7)
+        cbar.set_label(display_unit, fontsize=6.5, color="#333333", labelpad=2)
+        cbar.ax.tick_params(labelsize=6, colors="#333333", length=2, pad=1)
         cbar.outline.set_edgecolor("#bbbbbb")
 
     buf = _io.BytesIO()
