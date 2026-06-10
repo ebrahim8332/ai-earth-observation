@@ -268,6 +268,61 @@ def build_sar_map(image1, image2, bbox, date1_str, date2_str):
 
 
 # ---------------------------------------------------------------------------
+# Static thumbnails for Word export
+# ---------------------------------------------------------------------------
+
+def get_sar_thumbnails(image1, image2, bbox, date1_str, date2_str, size=400):
+    """Fetch four static PNG thumbnails from GEE for Word document export.
+
+    Returns a dict with keys: 'vv1', 'vv2', 'false_color', 'change'.
+    Each value is PNG bytes, or None if the fetch failed.
+
+    Uses getThumbURL() with the same vis_params as the interactive map,
+    so the thumbnails match what the user sees in the portal.
+    """
+    import ee
+    import requests as _requests
+
+    west, south, east, north = pad_bbox(bbox)
+    region = ee.Geometry.Rectangle([west, south, east, north])
+
+    VV_VIS     = {"min": -25, "max": 0,  "palette": ["000000", "ffffff"]}
+    VH_VIS     = {"min": -30, "max": -5, "palette": ["000000", "ffffff"]}
+    FC_VIS     = {"bands": ["VV", "VH", "ratio"],
+                  "min": [-20, -25, 0], "max": [0, -5, 15]}
+    CHANGE_VIS = {"min": -5, "max": 5,
+                  "palette": ["d73027", "fee090", "ffffbf", "e0f3f8", "4575b4"]}
+
+    vv1    = image1.select("VV")
+    vh1    = image1.select("VH")
+    rat1   = vv1.subtract(vh1).rename("ratio")
+    fc1    = vv1.addBands(vh1).addBands(rat1)
+
+    vv2    = image2.select("VV")
+    vh2    = image2.select("VH")
+    change = vv2.subtract(vv1).rename("change")
+
+    specs = [
+        ("vv1",         vv1,    VV_VIS),
+        ("vv2",         vv2,    VV_VIS),
+        ("false_color", fc1,    FC_VIS),
+        ("change",      change, CHANGE_VIS),
+    ]
+
+    results = {}
+    for key, img, vis in specs:
+        try:
+            params = {**vis, "region": region, "dimensions": size, "format": "png"}
+            url  = img.getThumbURL(params)
+            resp = _requests.get(url, timeout=30)
+            results[key] = resp.content if resp.status_code == 200 else None
+        except Exception:
+            results[key] = None
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Statistics chart
 # ---------------------------------------------------------------------------
 
@@ -383,10 +438,10 @@ def get_sar_interpretation(stats1, stats2, date1_str, date2_str,
         )
         text, model = ai_chain.complete(full_prompt, groq_key=groq_key, gemini_key=gemini_key)
         if text:
-            return text
+            return text, model
 
     return _sar_fallback(stats1, stats2, date1_str, date2_str,
-                         location_name, vv_change, vh_change)
+                         location_name, vv_change, vh_change), None
 
 
 def _sar_fallback(stats1, stats2, date1_str, date2_str,

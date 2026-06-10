@@ -1683,6 +1683,232 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
     st.stop()
 
 # ---------------------------------------------------------------------------
+# SAR Explorer helpers (Word document builder)
+# ---------------------------------------------------------------------------
+
+def _sar_stats_chart_png(stats1, stats2, date1, date2):
+    """Matplotlib grouped bar chart comparing VV/VH backscatter for two dates."""
+    import io as _io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as _np
+
+    categories = ["VV min", "VV mean", "VV max", "VH min", "VH mean", "VH max"]
+    vals1 = [stats1["VV_min"], stats1["VV_mean"], stats1["VV_max"],
+             stats1["VH_min"], stats1["VH_mean"], stats1["VH_max"]]
+    vals2 = [stats2["VV_min"], stats2["VV_mean"], stats2["VV_max"],
+             stats2["VH_min"], stats2["VH_mean"], stats2["VH_max"]]
+
+    x = _np.arange(len(categories))
+    w = 0.35
+
+    fig, ax = plt.subplots(figsize=(6.8, 3.0))
+    ax.bar(x - w/2, vals1, w, label=f"Date 1 ({date1})", color="#4a90d9")
+    ax.bar(x + w/2, vals2, w, label=f"Date 2 ({date2})", color="#2d7a2d")
+
+    ax.axhline(-20, color="#1f77b4", linewidth=1, linestyle=":",
+               label="-20 dB (calm water)")
+    ax.axhline(-5,  color="#2ca02c", linewidth=1, linestyle=":",
+               label="-5 dB (urban/ships)")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(categories, fontsize=7.5)
+    ax.set_ylabel("Backscatter (dB)", fontsize=8)
+    ax.set_title("Backscatter Comparison — Sentinel-1 SAR", fontsize=9.5)
+    ax.legend(fontsize=6.5, loc="lower right")
+    ax.tick_params(labelsize=7)
+    ax.grid(True, axis="y", alpha=0.3, linestyle="--")
+
+    buf = _io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+def build_sar_docx(ai_text, region, date1, date2, stats1, stats2,
+                   model_name="", thumbs=None):
+    """Build a Word document for the SAR Explorer result.
+
+    Sections:
+      1. Title and metadata
+      2. Backscatter statistics table
+      3. Backscatter comparison chart (matplotlib)
+      4. SAR thumbnails — 2×2 grid (VV D1, VV D2, False Color, Change Map)
+      5. AI Interpretation
+
+    thumbs: dict from get_sar_thumbnails() with keys vv1, vv2, false_color, change.
+    Returns bytes ready for st.download_button.
+    """
+    import io as _io
+    import re as _re
+    from docx import Document
+    from docx.shared import Inches, Pt
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    doc = Document()
+    sec = doc.sections[0]
+    sec.top_margin    = Inches(1)
+    sec.bottom_margin = Inches(1)
+    sec.left_margin   = Inches(1.1)
+    sec.right_margin  = Inches(1.1)
+    doc.styles["Normal"].font.name = "Calibri"
+    doc.styles["Normal"].font.size = Pt(11)
+
+    # ---- Title ----
+    t = doc.add_paragraph()
+    r = t.add_run("SAR Intelligence Report")
+    r.bold = True
+    r.font.size = Pt(16)
+
+    # ---- Metadata ----
+    for label, value in [
+        ("Region:",   region),
+        ("Date 1:",   date1),
+        ("Date 2:",   date2),
+        ("Sensor:",   "Sentinel-1 GRD (IW mode)"),
+        ("AI model:", model_name or "Built-in interpretation"),
+    ]:
+        p = doc.add_paragraph()
+        p.add_run(label + " ").bold = True
+        p.add_run(value)
+
+    doc.add_paragraph()
+
+    # ---- Backscatter statistics table ----
+    h = doc.add_paragraph("Backscatter Statistics")
+    h.style = doc.styles["Heading 1"]
+
+    tbl = doc.add_table(rows=1, cols=5)
+    tbl.style = "Table Grid"
+    hdrs = ["Metric", "VV min (dB)", "VV mean (dB)", "VH min (dB)", "VH mean (dB)"]
+    for ci, hdr in enumerate(hdrs):
+        tbl.rows[0].cells[ci].text = hdr
+        for run in tbl.rows[0].cells[ci].paragraphs[0].runs:
+            run.bold = True
+
+    for label, s in [(date1, stats1), (date2, stats2)]:
+        row = tbl.add_row().cells
+        row[0].text = label
+        row[1].text = str(s["VV_min"])
+        row[2].text = str(s["VV_mean"])
+        row[3].text = str(s["VH_min"])
+        row[4].text = str(s["VH_mean"])
+
+    # Change row
+    row = tbl.add_row().cells
+    row[0].text = "Change (D2 − D1)"
+    row[2].text = f"{stats2['VV_mean'] - stats1['VV_mean']:+.1f} dB"
+    row[4].text = f"{stats2['VH_mean'] - stats1['VH_mean']:+.1f} dB"
+
+    doc.add_paragraph()
+
+    # ---- Stats comparison chart ----
+    h = doc.add_paragraph("Backscatter Comparison Chart")
+    h.style = doc.styles["Heading 1"]
+    try:
+        chart_png = _sar_stats_chart_png(stats1, stats2, date1, date2)
+        doc.add_picture(_io.BytesIO(chart_png), width=Inches(4.8))
+    except Exception as _e:
+        doc.add_paragraph(f"[Chart could not be rendered: {_e}]")
+    doc.add_paragraph()
+
+    # ---- SAR thumbnails — 2×2 grid ----
+    if thumbs:
+        h = doc.add_paragraph("SAR Views")
+        h.style = doc.styles["Heading 1"]
+        doc.add_paragraph(
+            "Top row: VV polarization (Date 1 | Date 2). "
+            "Bottom row: False Color composite | Change Map (blue=increase, red=decrease)."
+        ).runs[0].font.size = Pt(8)
+
+        thumb_order = [
+            (f"VV — {date1}", thumbs.get("vv1")),
+            (f"VV — {date2}", thumbs.get("vv2")),
+            ("False Color",   thumbs.get("false_color")),
+            ("Change Map",    thumbs.get("change")),
+        ]
+
+        # Insert as a 2×2 borderless table so images sit side by side
+        grid = doc.add_table(rows=2, cols=2)
+        grid.style = "Table Grid"
+
+        # Remove all borders from the grid table
+        for row in grid.rows:
+            for cell in row.cells:
+                tc = cell._tc
+                tcPr = tc.get_or_add_tcPr()
+                tcBorders = OxmlElement("w:tcBorders")
+                for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                    border = OxmlElement(f"w:{side}")
+                    border.set(qn("w:val"), "none")
+                    tcBorders.append(border)
+                tcPr.append(tcBorders)
+
+        for idx, (label, png_bytes) in enumerate(thumb_order):
+            row_idx, col_idx = divmod(idx, 2)
+            cell = grid.rows[row_idx].cells[col_idx]
+            cell.paragraphs[0].clear()
+            p = cell.paragraphs[0]
+            p.add_run(label + "\n").bold = True
+            if png_bytes:
+                try:
+                    run = p.add_run()
+                    run.add_picture(_io.BytesIO(png_bytes), width=Inches(2.2))
+                except Exception:
+                    p.add_run("[thumbnail unavailable]")
+            else:
+                p.add_run("[thumbnail unavailable]")
+
+        doc.add_paragraph()
+
+    # ---- AI Interpretation ----
+    h = doc.add_paragraph("AI Interpretation")
+    h.style = doc.styles["Heading 1"]
+
+    def _sar_inline_bold(paragraph, text):
+        parts = _re.split(r"(\*\*.*?\*\*)", text)
+        for part in parts:
+            if part.startswith("**") and part.endswith("**"):
+                paragraph.add_run(part[2:-2]).bold = True
+            else:
+                paragraph.add_run(part)
+
+    if ai_text:
+        for line in ai_text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("## ") or stripped.startswith("# "):
+                p = doc.add_paragraph(stripped.lstrip("# ").strip())
+                p.style = doc.styles["Heading 1"]
+            elif stripped.startswith("- ") or stripped.startswith("* "):
+                p = doc.add_paragraph(style="List Bullet")
+                _sar_inline_bold(p, stripped[2:])
+            elif stripped.startswith("**") and stripped.endswith("**") and len(stripped) > 4:
+                p = doc.add_paragraph()
+                p.add_run(stripped.strip("*")).bold = True
+            elif stripped == "" or stripped.startswith("---"):
+                doc.add_paragraph()
+            else:
+                if stripped:
+                    p = doc.add_paragraph()
+                    _sar_inline_bold(p, stripped)
+    else:
+        doc.add_paragraph("No AI interpretation available.")
+
+    # ---- Footer ----
+    f = doc.add_paragraph()
+    f.add_run("Generated by EOIL — AI-Native Earth Observation Innovation Lab").italic = True
+
+    buf = _io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
 # MODULE 3 — SAR Explorer (reached only when SAR Explorer is selected)
 # ---------------------------------------------------------------------------
 
@@ -1835,7 +2061,9 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
     for _k, _v in [
         ("sar_maps",          None), ("sar_stats1",       None), ("sar_stats2", None),
         ("sar_result_region", None), ("sar_result_date1", None),
-        ("sar_result_date2",  None), ("sar_ai_result",    None),
+        ("sar_result_date2",  None), ("sar_result_bbox",  None),
+        ("sar_ai_result",     None), ("sar_ai_model",     None),
+        ("sar_thumbs",        None),
     ]:
         if _k not in st.session_state:
             st.session_state[_k] = _v
@@ -1888,12 +2116,19 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
             with st.spinner("Building interactive SAR map (this takes 20-40 seconds)..."):
                 sar_map = gee_sar.build_sar_map(img1, img2, eff_bbox, p["date1"], p["date2"])
 
-            st.session_state.sar_maps         = sar_map
-            st.session_state.sar_stats1       = stats1
-            st.session_state.sar_stats2       = stats2
+            st.session_state.sar_maps          = sar_map
+            st.session_state.sar_stats1        = stats1
+            st.session_state.sar_stats2        = stats2
             st.session_state.sar_result_region = p["region"]
             st.session_state.sar_result_date1  = p["date1"]
             st.session_state.sar_result_date2  = p["date2"]
+            st.session_state.sar_result_bbox   = eff_bbox
+            st.session_state.sar_ai_result     = None
+            st.session_state.sar_ai_model      = None
+            with st.spinner("Fetching SAR thumbnails for export..."):
+                st.session_state.sar_thumbs = gee_sar.get_sar_thumbnails(
+                    img1, img2, eff_bbox, p["date1"], p["date2"]
+                )
             st.success(
                 f"Analysis complete — {p['date1']} and {p['date2']} over {p['region']}."
             )
@@ -1982,15 +2217,51 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
         st.subheader("🤖 AI Interpretation")
         if st.button("Get AI Interpretation", type="primary", key="sar_ai_btn"):
             with st.spinner("Thinking..."):
-                interpretation = gee_sar.get_sar_interpretation(
+                interpretation, model_used = gee_sar.get_sar_interpretation(
                     stats1, stats2, r_d1, r_d2, r_reg,
                     groq_key=config.GROQ_API_KEY,
                     gemini_key=config.GEMINI_API_KEY,
                 )
                 st.session_state.sar_ai_result = interpretation
+                st.session_state.sar_ai_model  = model_used
 
         if st.session_state.get("sar_ai_result"):
-            st.markdown(st.session_state.sar_ai_result)
+            with st.expander("📋 AI Interpretation", expanded=True):
+                st.markdown(st.session_state.sar_ai_result)
+                _sar_model = st.session_state.get("sar_ai_model")
+                if _sar_model:
+                    st.caption(f"AI response from **{_sar_model}**")
+                else:
+                    st.caption("Showing built-in interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
+
+            _sar_safe = f"{r_reg.replace(' ','_').replace(',','')[:25]}_{r_d1}_{r_d2}"
+            _sar_c1, _sar_c2 = st.columns([1, 1])
+            with _sar_c1:
+                st.download_button(
+                    label="⬇ Download as Markdown",
+                    data=st.session_state.sar_ai_result,
+                    file_name=f"sar_{_sar_safe}.md",
+                    mime="text/markdown",
+                    key="sar_dl_md",
+                )
+            with _sar_c2:
+                _sar_docx = build_sar_docx(
+                    ai_text=st.session_state.sar_ai_result,
+                    region=r_reg,
+                    date1=r_d1,
+                    date2=r_d2,
+                    stats1=stats1,
+                    stats2=stats2,
+                    model_name=st.session_state.get("sar_ai_model", ""),
+                    thumbs=st.session_state.get("sar_thumbs") or {},
+                )
+                st.download_button(
+                    label="⬇ Download as Word (.docx)",
+                    data=_sar_docx,
+                    file_name=f"sar_{_sar_safe}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="sar_dl_docx",
+                )
 
     else:
         st.markdown("---")
