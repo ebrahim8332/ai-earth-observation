@@ -2274,6 +2274,102 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
     st.stop()
 
 # ---------------------------------------------------------------------------
+# MODULE 4 helpers — Change Detection Word/Markdown export
+# ---------------------------------------------------------------------------
+
+def _cd_add_inline_bold(para, text):
+    """Write a paragraph that may contain **bold** spans."""
+    import re as _re
+    from docx.oxml.ns import qn as _qn
+    parts = _re.split(r"(\*\*.*?\*\*)", text)
+    for part in parts:
+        if part.startswith("**") and part.endswith("**"):
+            run = para.add_run(part[2:-2])
+            run.bold = True
+        elif part:
+            para.add_run(part)
+
+
+def build_change_docx(region, date1, date2, src1, src2, stats, ai_text, ai_model):
+    """Build a Word document for the Change Detection module."""
+    import io as _io
+    from docx import Document as _Document
+    from docx.shared import Pt as _Pt, RGBColor as _RGB
+    from docx.enum.text import WD_ALIGN_PARAGRAPH as _ALIGN
+    from docx.oxml.ns import qn as _qn
+    from docx.oxml import OxmlElement as _OxmlElement
+
+    doc = _Document()
+
+    # Title
+    title = doc.add_heading("NDVI Change Detection Report", 0)
+    title.alignment = _ALIGN.CENTER
+
+    # Sub-heading
+    sub = doc.add_paragraph()
+    sub.alignment = _ALIGN.CENTER
+    sub.add_run(f"{region}   |   {date1}  →  {date2}").bold = True
+
+    doc.add_paragraph()
+
+    # Data sources
+    doc.add_heading("Data Sources", level=1)
+    doc.add_paragraph(f"Date 1 ({date1}): {src1 or 'GEE composite'}")
+    doc.add_paragraph(f"Date 2 ({date2}): {src2 or 'GEE composite'}")
+
+    doc.add_paragraph()
+
+    # Change Statistics table
+    doc.add_heading("Change Statistics", level=1)
+    tbl = doc.add_table(rows=1, cols=2)
+    tbl.style = "Table Grid"
+    hdr = tbl.rows[0].cells
+    hdr[0].text = "Metric"
+    hdr[1].text = "Value"
+    for cell in hdr:
+        for run in cell.paragraphs[0].runs:
+            run.bold = True
+
+    rows = [
+        ("Vegetation gain area",  f"{stats['area_gain_km2']:.2f} km²"),
+        ("Vegetation loss area",  f"{stats['area_loss_km2']:.2f} km²"),
+        ("Stable area",           f"{stats['area_stable_km2']:.2f} km²"),
+        ("Total analysed area",   f"{stats['area_total_km2']:.2f} km²"),
+        ("Net change",            f"{stats['net_change_km2']:.2f} km²"),
+        ("Pct gain",              f"{stats['pct_gain']:.1f}%"),
+        ("Pct loss",              f"{stats['pct_loss']:.1f}%"),
+        ("Pct stable",            f"{stats['pct_stable']:.1f}%"),
+        ("Mean NDVI change",      f"{stats.get('mean_diff', 0):.4f}"),
+        ("Std dev NDVI change",   f"{stats.get('std_diff', 0):.4f}"),
+        ("Extreme gain area",     f"{stats.get('extreme_gain_km2', 0):.2f} km²"),
+        ("Extreme loss area",     f"{stats.get('extreme_loss_km2', 0):.2f} km²"),
+    ]
+    for label, value in rows:
+        row_cells = tbl.add_row().cells
+        row_cells[0].text = label
+        row_cells[1].text = value
+
+    doc.add_paragraph()
+
+    # AI Interpretation
+    if ai_text:
+        doc.add_heading("AI Interpretation", level=1)
+        if ai_model:
+            doc.add_paragraph(f"Model: {ai_model}").italic = True
+        for line in ai_text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            p = doc.add_paragraph()
+            _cd_add_inline_bold(p, line)
+
+    buf = _io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+# ---------------------------------------------------------------------------
 # MODULE 4 — Change Detection (reached only when Change Detection is selected)
 # ---------------------------------------------------------------------------
 
@@ -2659,12 +2755,65 @@ in the top-right corner of the map.
                 st.session_state.cd_ai_model  = model_used
 
         if st.session_state.get("cd_ai_result"):
-            st.markdown(st.session_state.cd_ai_result)
-            model_used = st.session_state.get("cd_ai_model")
-            if model_used:
-                st.caption(f"AI response from **{model_used}**")
-            else:
-                st.caption("Showing built-in fallback interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
+            with st.expander("📋 AI Interpretation", expanded=True):
+                st.markdown(st.session_state.cd_ai_result)
+                model_used = st.session_state.get("cd_ai_model")
+                if model_used:
+                    st.caption(f"AI response from **{model_used}**")
+                else:
+                    st.caption("Showing built-in fallback interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
+
+            # Markdown download
+            _cd_md_lines = [
+                f"# NDVI Change Detection — {r_reg}",
+                f"**Date 1:** {r_d1}  |  **Date 2:** {r_d2}",
+                "",
+                "## Change Statistics",
+                "| Metric | Value |",
+                "|---|---|",
+                f"| Vegetation gain area | {stats['area_gain_km2']:.2f} km² |",
+                f"| Vegetation loss area | {stats['area_loss_km2']:.2f} km² |",
+                f"| Stable area | {stats['area_stable_km2']:.2f} km² |",
+                f"| Total analysed area | {stats['area_total_km2']:.2f} km² |",
+                f"| Net change | {stats['net_change_km2']:.2f} km² |",
+                f"| Pct gain | {stats['pct_gain']:.1f}% |",
+                f"| Pct loss | {stats['pct_loss']:.1f}% |",
+                f"| Pct stable | {stats['pct_stable']:.1f}% |",
+                f"| Mean NDVI change | {stats.get('mean_diff', 0):.4f} |",
+                f"| Std dev NDVI change | {stats.get('std_diff', 0):.4f} |",
+                f"| Extreme gain area | {stats.get('extreme_gain_km2', 0):.2f} km² |",
+                f"| Extreme loss area | {stats.get('extreme_loss_km2', 0):.2f} km² |",
+                "",
+                "## AI Interpretation",
+                st.session_state.cd_ai_result or "",
+            ]
+            _cd_md_bytes = "\n".join(_cd_md_lines).encode()
+            _cd_safe_reg = r_reg.replace(" ", "_").replace(",", "")
+            _cd_dl1, _cd_dl2 = st.columns(2)
+            with _cd_dl1:
+                st.download_button(
+                    label="⬇️ Download Markdown",
+                    data=_cd_md_bytes,
+                    file_name=f"change_detection_{_cd_safe_reg}_{r_d1}_{r_d2}.md",
+                    mime="text/markdown",
+                    key="cd_dl_md",
+                )
+            with _cd_dl2:
+                _cd_docx_bytes = build_change_docx(
+                    r_reg, r_d1, r_d2,
+                    st.session_state.get("cd_result_src1", ""),
+                    st.session_state.get("cd_result_src2", ""),
+                    stats,
+                    st.session_state.cd_ai_result,
+                    st.session_state.get("cd_ai_model"),
+                )
+                st.download_button(
+                    label="⬇️ Download Word Doc",
+                    data=_cd_docx_bytes,
+                    file_name=f"change_detection_{_cd_safe_reg}_{r_d1}_{r_d2}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="cd_dl_docx",
+                )
 
         cd_section_break()
 
