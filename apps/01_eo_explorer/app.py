@@ -2372,102 +2372,100 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
 # MODULE 6 — Emissions Explorer helpers (Word document builder)
 # ---------------------------------------------------------------------------
 
-def _em_static_map_bytes(bbox, region_name=""):
-    """Render a clean bounding-box location map as PNG bytes using matplotlib.
+def _lonlat_to_webmercator(lon, lat):
+    """Convert WGS-84 lon/lat degrees to Web Mercator (EPSG:3857) metres."""
+    import math
+    x = lon * 20037508.34 / 180.0
+    y = math.log(math.tan((90.0 + lat) * math.pi / 360.0)) / (math.pi / 180.0)
+    y = y * 20037508.34 / 180.0
+    return x, y
 
-    bbox is (min_lon, min_lat, max_lon, max_lat).
+
+def _em_static_map_bytes(bbox, region_name=""):
+    """Render a basemap tile map with the analysis region highlighted.
+
+    Uses contextily to fetch OpenStreetMap tiles so the output looks like
+    the interactive Folium map (country borders, place names, roads).
+    bbox is (min_lon, min_lat, max_lon, max_lat) in WGS-84.
     Returns PNG bytes for embedding in the Word document.
     """
     import io as _io
+    import math
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
     import matplotlib.patheffects as pe
+    import contextily as ctx
 
     min_lon, min_lat, max_lon, max_lat = bbox
     span_lon = max_lon - min_lon
     span_lat = max_lat - min_lat
 
-    # Tight padding — just enough to show context without dwarfing the region
-    pad_lon = max(span_lon * 0.45, 0.15)
-    pad_lat = max(span_lat * 0.45, 0.15)
+    # Convert bbox corners to Web Mercator
+    x_min, y_min = _lonlat_to_webmercator(min_lon, min_lat)
+    x_max, y_max = _lonlat_to_webmercator(max_lon, max_lat)
 
-    fig, ax = plt.subplots(figsize=(5.5, 4))
-    fig.patch.set_facecolor("#1c2b3a")
-    ax.set_facecolor("#263545")
+    # Padding in Web Mercator units — enough context to show surrounding area
+    pad_x = max((x_max - x_min) * 0.6, 30000)
+    pad_y = max((y_max - y_min) * 0.6, 30000)
 
-    # Ocean / background grid lines that look like a map graticule
-    ax.grid(True, color="#344d61", linewidth=0.6, linestyle="-", alpha=0.8, zorder=0)
+    fig, ax = plt.subplots(figsize=(5.5, 4.2))
 
-    # Subtle latitude/longitude reference lines through centre
-    cx = (min_lon + max_lon) / 2
-    cy = (min_lat + max_lat) / 2
-    ax.axhline(cy, color="#4a6680", linewidth=0.5, linestyle="--", alpha=0.5, zorder=1)
-    ax.axvline(cx, color="#4a6680", linewidth=0.5, linestyle="--", alpha=0.5, zorder=1)
+    # Set axis limits (Web Mercator) before adding basemap
+    ax.set_xlim(x_min - pad_x, x_max + pad_x)
+    ax.set_ylim(y_min - pad_y, y_max + pad_y)
 
-    # Filled region rectangle
-    rect = mpatches.Rectangle(
-        (min_lon, min_lat), span_lon, span_lat,
-        linewidth=0, facecolor="#3498db", alpha=0.35, zorder=2,
+    # Add OpenStreetMap basemap tiles
+    try:
+        ctx.add_basemap(
+            ax,
+            crs="EPSG:3857",
+            source=ctx.providers.CartoDB.Positron,
+            zoom="auto",
+            attribution=False,
+        )
+    except Exception:
+        # Fallback if tiles can't be fetched (no network)
+        ax.set_facecolor("#d6e4f0")
+
+    # Highlighted region rectangle (semi-transparent fill + solid border)
+    rect_fill = mpatches.Rectangle(
+        (x_min, y_min), x_max - x_min, y_max - y_min,
+        linewidth=0, facecolor="#e74c3c", alpha=0.20, zorder=3,
     )
-    ax.add_patch(rect)
-
-    # Region border
-    border = mpatches.Rectangle(
-        (min_lon, min_lat), span_lon, span_lat,
-        linewidth=2.0, edgecolor="#5dade2", facecolor="none", zorder=3,
+    rect_border = mpatches.Rectangle(
+        (x_min, y_min), x_max - x_min, y_max - y_min,
+        linewidth=2.2, edgecolor="#c0392b", facecolor="none", zorder=4,
     )
-    ax.add_patch(border)
+    ax.add_patch(rect_fill)
+    ax.add_patch(rect_border)
 
-    # Centre crosshair marker
-    ax.plot(cx, cy, "+", color="#f0f4f8", markersize=10, markeredgewidth=1.8, zorder=5)
-    ax.plot(cx, cy, "o", color="#e74c3c", markersize=5, zorder=6)
+    # Centre marker
+    cx_m = (x_min + x_max) / 2
+    cy_m = (y_min + y_max) / 2
+    ax.plot(cx_m, cy_m, "o", color="#c0392b", markersize=6,
+            markeredgecolor="white", markeredgewidth=1.2, zorder=5)
 
-    # Region name label above the box
+    # Region name label just above the box
     if region_name:
-        short = region_name[:35] + ("…" if len(region_name) > 35 else "")
+        short = region_name[:40] + ("…" if len(region_name) > 40 else "")
         ax.text(
-            cx, max_lat + pad_lat * 0.18,
+            cx_m, y_max + pad_y * 0.08,
             short,
-            ha="center", va="bottom",
-            fontsize=8, color="#f0f4f8", fontweight="bold",
-            path_effects=[pe.withStroke(linewidth=2, foreground="#1c2b3a")],
-            zorder=7,
+            ha="center", va="bottom", fontsize=8,
+            color="#1a1a1a", fontweight="bold",
+            path_effects=[pe.withStroke(linewidth=2.5, foreground="white")],
+            zorder=6,
         )
 
-    # Bounding-box coordinate callouts at two corners (outside the box)
-    ax.annotate(
-        f"{abs(min_lat):.2f}°{'S' if min_lat < 0 else 'N'} {abs(min_lon):.2f}°{'W' if min_lon < 0 else 'E'}",
-        xy=(min_lon, min_lat),
-        xytext=(min_lon - pad_lon * 0.05, min_lat - pad_lat * 0.15),
-        fontsize=6.5, color="#a8c8e8", ha="left", va="top", zorder=7,
-        path_effects=[pe.withStroke(linewidth=1.5, foreground="#1c2b3a")],
-    )
-    ax.annotate(
-        f"{abs(max_lat):.2f}°{'S' if max_lat < 0 else 'N'} {abs(max_lon):.2f}°{'W' if max_lon < 0 else 'E'}",
-        xy=(max_lon, max_lat),
-        xytext=(max_lon + pad_lon * 0.05, max_lat + pad_lat * 0.12),
-        fontsize=6.5, color="#a8c8e8", ha="right", va="bottom", zorder=7,
-        path_effects=[pe.withStroke(linewidth=1.5, foreground="#1c2b3a")],
-    )
-
-    ax.set_xlim(min_lon - pad_lon, max_lon + pad_lon)
-    ax.set_ylim(min_lat - pad_lat, max_lat + pad_lat)
-
-    ax.set_xlabel("Longitude", fontsize=7.5, color="#7fb3d3", labelpad=4)
-    ax.set_ylabel("Latitude",  fontsize=7.5, color="#7fb3d3", labelpad=4)
-    ax.tick_params(colors="#7fb3d3", labelsize=7)
-    for spine in ax.spines.values():
-        spine.set_edgecolor("#4a6680")
-
-    ax.set_title("Analysis Region", fontsize=9.5, color="#cde4f5",
-                 fontweight="bold", pad=8)
+    ax.set_axis_off()
+    ax.set_title("Analysis Region", fontsize=9.5, fontweight="bold",
+                 color="#222222", pad=6)
 
     buf = _io.BytesIO()
-    plt.tight_layout(pad=0.8)
-    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight",
-                facecolor=fig.get_facecolor())
+    plt.tight_layout(pad=0.5)
+    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
     return buf.read()

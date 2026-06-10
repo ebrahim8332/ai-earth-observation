@@ -15,3 +15,4 @@ earthengine-api==1.7.29
 scikit-learn
 matplotlib
 python-docx
+contextily
