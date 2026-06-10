@@ -353,9 +353,15 @@ only in the {r_wl} range.
 # Time Series Explorer helpers (Word document builder)
 # ---------------------------------------------------------------------------
 
+def _plotly_to_png(fig, width, height):
+    """Render a Plotly figure to PNG bytes at the given pixel size."""
+    fig.update_layout(width=width, height=height,
+                      margin=dict(l=55, r=25, t=50, b=45))
+    return fig.to_image(format="png", scale=2)
+
+
 def build_timeseries_docx(ai_text, dataset, region, start_year, end_year,
-                           stats, unit, model_name="",
-                           chart_ts=None, chart_seasonal=None, chart_annual=None):
+                           stats, unit, df, model_name=""):
     """Build a Word document for the Time Series Explorer result.
 
     Sections:
@@ -366,7 +372,7 @@ def build_timeseries_docx(ai_text, dataset, region, start_year, end_year,
       5. Annual Comparison chart
       6. AI Interpretation (markdown → Word formatting)
 
-    chart_ts / chart_seasonal / chart_annual: PNG bytes from Plotly to_image().
+    Charts are rendered on demand from df + stats using kaleido.
     Returns bytes ready for st.download_button.
     """
     import io as _io
@@ -430,22 +436,34 @@ def build_timeseries_docx(ai_text, dataset, region, start_year, end_year,
 
     doc.add_paragraph()
 
-    # ---- Charts ----
-    # Each chart is inserted at full text width (4.8") so axis labels stay readable.
-    for heading, chart_bytes in [
-        ("Time Series",       chart_ts),
-        ("Seasonal Cycle",    chart_seasonal),
-        ("Annual Comparison", chart_annual),
-    ]:
+    # ---- Charts — rendered on demand from df + stats ----
+    # Annual chart boundaries mirror the same formula used in the portal display.
+    _eb = end_year   - max(1, (end_year - start_year) // 4)
+    _sb = start_year + max(1, (end_year - start_year) // 4)
+
+    chart_specs = [
+        ("Time Series",
+         lambda: _plotly_to_png(
+             gee_timeseries.build_timeseries_chart(df, stats, dataset, region, start_year, end_year),
+             780, 340)),
+        ("Seasonal Cycle",
+         lambda: _plotly_to_png(
+             gee_timeseries.build_seasonal_chart(stats, dataset),
+             560, 300)),
+        ("Annual Comparison",
+         lambda: _plotly_to_png(
+             gee_timeseries.build_annual_means_chart(df, dataset, start_year, end_year, _sb, _eb),
+             780, 300)),
+    ]
+
+    for heading, render_fn in chart_specs:
         h = doc.add_paragraph(heading)
         h.style = doc.styles["Heading 1"]
-        if chart_bytes:
-            try:
-                doc.add_picture(_io.BytesIO(chart_bytes), width=Inches(4.8))
-            except Exception:
-                doc.add_paragraph("[Chart could not be embedded]")
-        else:
-            doc.add_paragraph("[Chart not available — run analysis first]")
+        try:
+            png = render_fn()
+            doc.add_picture(_io.BytesIO(png), width=Inches(4.8))
+        except Exception as _e:
+            doc.add_paragraph(f"[Chart could not be rendered: {_e}]")
         doc.add_paragraph()
 
     # ---- AI Interpretation ----
@@ -695,7 +713,6 @@ has shifted across the full period.
         ("ts_result_start",   None), ("ts_result_end",    None),
         ("ts_is_sample", True),
         ("ts_ai_result", None), ("ts_ai_model", None),
-        ("ts_chart_ts", None), ("ts_chart_seasonal", None), ("ts_chart_annual", None),
     ]:
         if _k not in st.session_state:
             st.session_state[_k] = _v
@@ -749,29 +766,6 @@ has shifted across the full period.
                 st.session_state.ts_is_sample      = is_sample
                 st.session_state.ts_ai_result      = None
                 st.session_state.ts_ai_model       = None
-
-                # Pre-render charts as PNG bytes for Word export.
-                # Width/height set to match Word page proportions (6.5" × 3" at 150dpi).
-                _eb = p["end"] - max(1, (p["end"] - p["start"]) // 4)
-                _sb = p["start"] + max(1, (p["end"] - p["start"]) // 4)
-                try:
-                    _fig_ts  = gee_timeseries.build_timeseries_chart(df, stats, p["dataset"], p["region"], p["start"], p["end"])
-                    _fig_ts.update_layout(width=780, height=340, margin=dict(l=55, r=25, t=50, b=45))
-                    st.session_state.ts_chart_ts = _fig_ts.to_image(format="png", scale=1.8)
-                except Exception:
-                    st.session_state.ts_chart_ts = None
-                try:
-                    _fig_sea = gee_timeseries.build_seasonal_chart(stats, p["dataset"])
-                    _fig_sea.update_layout(width=560, height=300, margin=dict(l=55, r=20, t=50, b=40))
-                    st.session_state.ts_chart_seasonal = _fig_sea.to_image(format="png", scale=1.8)
-                except Exception:
-                    st.session_state.ts_chart_seasonal = None
-                try:
-                    _fig_ann = gee_timeseries.build_annual_means_chart(df, p["dataset"], p["start"], p["end"], _sb, _eb)
-                    _fig_ann.update_layout(width=780, height=300, margin=dict(l=55, r=20, t=50, b=45))
-                    st.session_state.ts_chart_annual = _fig_ann.to_image(format="png", scale=1.8)
-                except Exception:
-                    st.session_state.ts_chart_annual = None
 
                 # Reset AI prompt to match the new region and dataset
                 st.session_state.ts_ai_prompt = (
@@ -943,10 +937,8 @@ has shifted across the full period.
                     end_year=r_end,
                     stats=stats,
                     unit=unit,
+                    df=df,
                     model_name=st.session_state.get("ts_ai_model", ""),
-                    chart_ts=st.session_state.get("ts_chart_ts"),
-                    chart_seasonal=st.session_state.get("ts_chart_seasonal"),
-                    chart_annual=st.session_state.get("ts_chart_annual"),
                 )
                 st.download_button(
                     label="⬇ Download as Word (.docx)",
