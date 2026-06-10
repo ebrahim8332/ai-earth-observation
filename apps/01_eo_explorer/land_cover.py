@@ -631,13 +631,28 @@ Top 3 most important spectral features for the Random Forest:
 Scene date: {scene['scene_date']}
 Cloud cover: {scene['scene_cloud']:.1f}%
 
-Write a structured interpretation in 4 short paragraphs:
-1. What the dominant land cover types are and what they indicate about this landscape.
-2. What the top features tell us — why those spectral signals drove the classification.
-3. Where K-means and Random Forest likely agree and where they may diverge.
-4. One practical application of this classification (e.g. agriculture monitoring, urban expansion tracking, water resource mapping).
+Write a detailed analysis covering all four sections below. \
+Each section should be a full paragraph of 4-6 sentences. \
+Do not compress or summarise — the reader needs depth, not brevity.
 
-Be direct. No more than 200 words total. No filler phrases."""
+**Section 1 — Land Cover Pattern:** Describe the dominant land cover types and what they reveal \
+about this landscape. Discuss the proportional breakdown, whether the distribution is expected \
+for this geography, and any notable absences or surprises in the classification.
+
+**Section 2 — Spectral Drivers:** Explain what the top-ranked spectral features tell us. \
+Why did those specific signals drive the Random Forest classification? What physical properties \
+of the surface do they capture, and what does that indicate about the land cover composition?
+
+**Section 3 — Algorithm Agreement:** Describe where K-means and Random Forest are likely to \
+agree and where they are likely to diverge. Which land cover classes are spectrally distinct \
+enough that both methods will agree, and which are ambiguous enough to cause disagreement?
+
+**Section 4 — Decision Application:** Name one specific stakeholder (government agency, \
+agricultural ministry, infrastructure operator, insurer, or NGO) and describe exactly how \
+they would use this classification to make a real decision. Be specific about the decision, \
+the data they would act on, and what the alternative would be without this analysis.
+
+Write in plain language. Use the bold section headings. Be direct and thorough."""
 
     text, model = ai_chain.complete(
         prompt,
@@ -670,6 +685,163 @@ The most important feature for the Random Forest classifier was **{top1}**. This
 K-means and Random Forest typically agree on pixels with strong spectral signatures (pure water, dense vegetation, bright desert) and diverge at class boundaries where pixels contain mixed land cover types.
 
 To enable AI interpretation, add a GROQ_API_KEY or GEMINI_API_KEY to your .env file."""
+
+
+# ---------------------------------------------------------------------------
+# Word / Markdown export helpers
+# ---------------------------------------------------------------------------
+
+def _numpy_to_png_bytes(arr):
+    """Convert a uint8 numpy array (H, W, 3) to PNG bytes."""
+    from PIL import Image as _PILImage
+    import io as _io
+    buf = _io.BytesIO()
+    _PILImage.fromarray(arr).save(buf, format="PNG")
+    buf.seek(0)
+    return buf.read()
+
+
+def _lc_add_inline_bold(para, text):
+    """Write a paragraph that may contain **bold** spans."""
+    import re as _re
+    parts = _re.split(r"(\*\*.*?\*\*)", text)
+    for part in parts:
+        if part.startswith("**") and part.endswith("**"):
+            para.add_run(part[2:-2]).bold = True
+        elif part:
+            para.add_run(part)
+
+
+def build_land_cover_docx(region, scene_date, scene_cloud,
+                          rgb_arr, km_arr, rf_arr,
+                          km_result, rf_result,
+                          ai_text, ai_model):
+    """Build a Word document for the Land Cover Intelligence module.
+
+    Sections:
+      1. Title and scene metadata
+      2. Classification thumbnails — 1×3 grid (True Color, K-means, Random Forest)
+      3. K-means cluster statistics table
+      4. Random Forest class breakdown table
+      5. Feature importance table
+      6. AI Interpretation
+    """
+    import io as _io
+    from docx import Document as _Document
+    from docx.shared import Pt as _Pt, Inches as _Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH as _ALIGN
+    from docx.oxml import OxmlElement as _OxmlElement
+    from docx.oxml.ns import qn as _qn
+
+    doc = _Document()
+
+    # ---- Title ----
+    title = doc.add_heading("Land Cover Classification Report", 0)
+    title.alignment = _ALIGN.CENTER
+    sub = doc.add_paragraph()
+    sub.alignment = _ALIGN.CENTER
+    sub.add_run(f"{region}   |   {scene_date}   |   Cloud cover {scene_cloud:.1f}%").bold = True
+    doc.add_paragraph()
+
+    # ---- Classification thumbnails ----
+    doc.add_heading("Classification Maps", level=1)
+    thumb_specs = [
+        ("True Color",  rgb_arr),
+        ("K-means",     km_arr),
+        ("Random Forest", rf_arr),
+    ]
+    tbl_t = doc.add_table(rows=2, cols=3)
+    # Remove all borders
+    for row in tbl_t.rows:
+        for cell in row.cells:
+            tc = cell._tc
+            tcPr = tc.get_or_add_tcPr()
+            tcBorders = _OxmlElement("w:tcBorders")
+            for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                border = _OxmlElement(f"w:{side}")
+                border.set(_qn("w:val"), "none")
+                tcBorders.append(border)
+            tcPr.append(tcBorders)
+    for col_idx, (label, arr) in enumerate(thumb_specs):
+        img_cell = tbl_t.rows[0].cells[col_idx]
+        cap_cell = tbl_t.rows[1].cells[col_idx]
+        if arr is not None:
+            png_bytes = _numpy_to_png_bytes(arr)
+            run = img_cell.paragraphs[0].add_run()
+            run.add_picture(_io.BytesIO(png_bytes), width=_Inches(1.9))
+        else:
+            img_cell.paragraphs[0].add_run("Not available")
+        cap_cell.paragraphs[0].add_run(label).bold = True
+    doc.add_paragraph()
+
+    # ---- K-means cluster statistics ----
+    doc.add_heading("K-means Cluster Statistics", level=1)
+    km_tbl = doc.add_table(rows=1, cols=5)
+    km_tbl.style = "Table Grid"
+    hdr = km_tbl.rows[0].cells
+    for cell, txt in zip(hdr, ["Cluster", "Land Cover", "Area %", "Mean NDVI", "Mean NDWI"]):
+        cell.text = txt
+        cell.paragraphs[0].runs[0].bold = True
+    km_labels = km_result["label_map"]
+    for stats in sorted(km_result["cluster_stats"], key=lambda x: -x["pct"]):
+        row = km_tbl.add_row().cells
+        row[0].text = str(stats["cluster"])
+        row[1].text = km_labels.get(stats["cluster"], "—")
+        row[2].text = f"{stats['pct']:.1f}%"
+        row[3].text = f"{stats['ndvi']:+.3f}"
+        row[4].text = f"{stats['ndwi']:+.3f}"
+    doc.add_paragraph()
+
+    # ---- Random Forest class breakdown ----
+    doc.add_heading("Random Forest Class Breakdown", level=1)
+    n_pixels = rf_result["rf_map"].size
+    rf_tbl = doc.add_table(rows=1, cols=3)
+    rf_tbl.style = "Table Grid"
+    hdr2 = rf_tbl.rows[0].cells
+    for cell, txt in zip(hdr2, ["Land Cover Class", "Pixels", "Area %"]):
+        cell.text = txt
+        cell.paragraphs[0].runs[0].bold = True
+    for label, count in sorted(rf_result["class_counts"].items(),
+                                key=lambda x: -x[1]):
+        if count > 0:
+            row = rf_tbl.add_row().cells
+            row[0].text = label
+            row[1].text = f"{count:,}"
+            row[2].text = f"{100.0 * count / n_pixels:.1f}%"
+    doc.add_paragraph()
+
+    # ---- Feature importances ----
+    doc.add_heading("Random Forest Feature Importances", level=1)
+    fi_tbl = doc.add_table(rows=1, cols=2)
+    fi_tbl.style = "Table Grid"
+    hdr3 = fi_tbl.rows[0].cells
+    for cell, txt in zip(hdr3, ["Feature", "Importance"]):
+        cell.text = txt
+        cell.paragraphs[0].runs[0].bold = True
+    names = rf_result["feature_names"]
+    imps  = rf_result["importances"]
+    for i in sorted(range(len(names)), key=lambda x: -imps[x]):
+        row = fi_tbl.add_row().cells
+        row[0].text = names[i]
+        row[1].text = f"{imps[i]:.4f}"
+    doc.add_paragraph()
+
+    # ---- AI Interpretation ----
+    if ai_text:
+        doc.add_heading("AI Interpretation", level=1)
+        if ai_model:
+            doc.add_paragraph(f"Model: {ai_model}").italic = True
+        for line in ai_text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            p = doc.add_paragraph()
+            _lc_add_inline_bold(p, line)
+
+    buf = _io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
 
 
 # ---------------------------------------------------------------------------
@@ -1055,10 +1227,72 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
                     st.session_state.lc_ai_model = "fallback"
 
         if st.session_state.get("lc_ai"):
-            st.markdown(st.session_state.lc_ai)
-            model = st.session_state.get("lc_ai_model", "")
-            if model and model != "fallback":
-                st.caption(f"AI response from {model}")
+            with st.expander("📋 AI Interpretation", expanded=True):
+                st.markdown(st.session_state.lc_ai)
+                _lc_model = st.session_state.get("lc_ai_model", "")
+                if _lc_model and _lc_model != "fallback":
+                    st.caption(f"AI response from **{_lc_model}**")
+                else:
+                    st.caption("Showing built-in fallback interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
+
+            # Build stats for Markdown table
+            _lc_n_px = rf_result["rf_map"].size
+            _lc_md_rows = ["| Land Cover Class | Pixels | Area % |", "|---|---|---|"]
+            for _lbl, _cnt in sorted(rf_result["class_counts"].items(), key=lambda x: -x[1]):
+                if _cnt > 0:
+                    _lc_md_rows.append(f"| {_lbl} | {_cnt:,} | {100.0 * _cnt / _lc_n_px:.1f}% |")
+
+            _lc_fi_rows = ["| Feature | Importance |", "|---|---|"]
+            _fi_names = rf_result["feature_names"]
+            _fi_imps  = rf_result["importances"]
+            for _i in sorted(range(len(_fi_names)), key=lambda x: -_fi_imps[x]):
+                _lc_fi_rows.append(f"| {_fi_names[_i]} | {_fi_imps[_i]:.4f} |")
+
+            _lc_md_lines = [
+                f"# Land Cover Classification — {region}",
+                f"**Scene date:** {scene['scene_date']}   |   **Cloud cover:** {scene['scene_cloud']:.1f}%",
+                "",
+                "## Random Forest Class Breakdown",
+                *_lc_md_rows,
+                "",
+                "## Feature Importances",
+                *_lc_fi_rows,
+                "",
+                "## AI Interpretation",
+                st.session_state.lc_ai or "",
+            ]
+            _lc_md_bytes = "\n".join(_lc_md_lines).encode()
+            _lc_safe_reg = region.replace(" ", "_").replace(",", "")
+
+            _lc_c1, _lc_c2 = st.columns(2)
+            with _lc_c1:
+                st.download_button(
+                    label="⬇️ Download Markdown",
+                    data=_lc_md_bytes,
+                    file_name=f"land_cover_{_lc_safe_reg}_{scene['scene_date']}.md",
+                    mime="text/markdown",
+                    key="lc_dl_md",
+                )
+            with _lc_c2:
+                _lc_docx_bytes = build_land_cover_docx(
+                    region=region,
+                    scene_date=scene["scene_date"],
+                    scene_cloud=scene["scene_cloud"],
+                    rgb_arr=scene.get("rgb"),
+                    km_arr=kmeans_to_color_image(km_result),
+                    rf_arr=rf_to_color_image(rf_result),
+                    km_result=km_result,
+                    rf_result=rf_result,
+                    ai_text=st.session_state.lc_ai,
+                    ai_model=st.session_state.get("lc_ai_model", ""),
+                )
+                st.download_button(
+                    label="⬇️ Download Word Doc",
+                    data=_lc_docx_bytes,
+                    file_name=f"land_cover_{_lc_safe_reg}_{scene['scene_date']}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="lc_dl_docx",
+                )
 
         # --- Data Quality ---
         st.divider()
