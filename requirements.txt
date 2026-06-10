@@ -16,3 +16,4 @@ scikit-learn
 matplotlib
 python-docx
 contextily
+kaleido

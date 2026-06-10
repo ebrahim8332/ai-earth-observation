@@ -349,6 +349,184 @@ only in the {r_wl} range.
 
 # ===========================================================================
 # MODULE ROUTING
+# ---------------------------------------------------------------------------
+# Time Series Explorer helpers (Word document builder)
+# ---------------------------------------------------------------------------
+
+def build_timeseries_docx(ai_text, dataset, region, start_year, end_year,
+                           stats, unit, model_name="",
+                           chart_ts=None, chart_seasonal=None, chart_annual=None):
+    """Build a Word document for the Time Series Explorer result.
+
+    Sections:
+      1. Title and metadata
+      2. Statistics table (mean, trend, peak/trough, amplitude)
+      3. Time Series chart
+      4. Seasonal Cycle chart
+      5. Annual Comparison chart
+      6. AI Interpretation (markdown → Word formatting)
+
+    chart_ts / chart_seasonal / chart_annual: PNG bytes from Plotly to_image().
+    Returns bytes ready for st.download_button.
+    """
+    import io as _io
+    import re as _re
+    from docx import Document
+    from docx.shared import Inches, Pt
+
+    doc = Document()
+
+    # Margins and font
+    sec = doc.sections[0]
+    sec.top_margin    = Inches(1)
+    sec.bottom_margin = Inches(1)
+    sec.left_margin   = Inches(1.1)
+    sec.right_margin  = Inches(1.1)
+    doc.styles["Normal"].font.name = "Calibri"
+    doc.styles["Normal"].font.size = Pt(11)
+
+    # ---- Title ----
+    t = doc.add_paragraph()
+    r = t.add_run("Time Series Intelligence Report")
+    r.bold = True
+    r.font.size = Pt(16)
+
+    # ---- Metadata ----
+    for label, value in [
+        ("Dataset:",   dataset),
+        ("Region:",    region),
+        ("Period:",    f"{start_year} – {end_year}"),
+        ("AI model:",  model_name or "Built-in interpretation"),
+    ]:
+        p = doc.add_paragraph()
+        p.add_run(label + " ").bold = True
+        p.add_run(str(value))
+
+    doc.add_paragraph()
+
+    # ---- Statistics table ----
+    h = doc.add_paragraph("Statistics")
+    h.style = doc.styles["Heading 1"]
+
+    stat_rows = [
+        ("Observations",        str(stats.get("count", "—"))),
+        (f"Mean ({unit})",      f"{stats['mean']:.3f}"),
+        (f"Min ({unit})",       f"{stats['min']:.3f}"),
+        (f"Max ({unit})",       f"{stats['max']:.3f}"),
+        ("Trend direction",     stats.get("trend_direction", "—").capitalize()),
+        (f"Trend ({unit}/year)",f"{stats['slope_per_year']:+.4f}"),
+        ("Peak month",          f"{stats['peak_month']} ({stats['peak_value']:.3f} {unit})"),
+        ("Trough month",        f"{stats['trough_month']} ({stats['trough_value']:.3f} {unit})"),
+        (f"Amplitude ({unit})", f"{stats['amplitude']:.3f}"),
+    ]
+    tbl = doc.add_table(rows=len(stat_rows), cols=2)
+    tbl.style = "Table Grid"
+    for ri, (lbl, val) in enumerate(stat_rows):
+        cells = tbl.rows[ri].cells
+        cells[0].text = lbl
+        for run in cells[0].paragraphs[0].runs:
+            run.bold = True
+        cells[1].text = val
+
+    doc.add_paragraph()
+
+    # ---- Charts ----
+    # Each chart is inserted at full text width (4.8") so axis labels stay readable.
+    for heading, chart_bytes in [
+        ("Time Series",       chart_ts),
+        ("Seasonal Cycle",    chart_seasonal),
+        ("Annual Comparison", chart_annual),
+    ]:
+        h = doc.add_paragraph(heading)
+        h.style = doc.styles["Heading 1"]
+        if chart_bytes:
+            try:
+                doc.add_picture(_io.BytesIO(chart_bytes), width=Inches(4.8))
+            except Exception:
+                doc.add_paragraph("[Chart could not be embedded]")
+        else:
+            doc.add_paragraph("[Chart not available — run analysis first]")
+        doc.add_paragraph()
+
+    # ---- AI Interpretation ----
+    h = doc.add_paragraph("AI Interpretation")
+    h.style = doc.styles["Heading 1"]
+
+    def _ts_inline_bold(paragraph, text):
+        parts = _re.split(r"(\*\*.*?\*\*)", text)
+        for part in parts:
+            if part.startswith("**") and part.endswith("**"):
+                paragraph.add_run(part[2:-2]).bold = True
+            else:
+                paragraph.add_run(part)
+
+    if ai_text:
+        lines = ai_text.splitlines()
+        i = 0
+        while i < len(lines):
+            stripped = lines[i].strip()
+            if stripped.startswith("## ") or stripped.startswith("# "):
+                p = doc.add_paragraph(stripped.lstrip("# ").strip())
+                p.style = doc.styles["Heading 1"]
+                i += 1
+            elif stripped.startswith("|"):
+                block = []
+                while i < len(lines) and lines[i].strip().startswith("|"):
+                    block.append(lines[i])
+                    i += 1
+                data_lines = [l for l in block if not _re.match(r"^\s*\|[-| :]+\|\s*$", l)]
+                if len(data_lines) >= 2:
+                    def _split(ln):
+                        return [c.strip() for c in ln.strip().strip("|").split("|")]
+                    hdrs = _split(data_lines[0])
+                    rws  = [_split(l) for l in data_lines[1:]]
+                    t2   = doc.add_table(rows=1 + len(rws), cols=len(hdrs))
+                    t2.style = "Table Grid"
+                    for ci, hdr in enumerate(hdrs):
+                        t2.rows[0].cells[ci].text = hdr
+                        for run in t2.rows[0].cells[ci].paragraphs[0].runs:
+                            run.bold = True
+                    for ri2, rd in enumerate(rws):
+                        for ci, ct in enumerate(rd):
+                            if ci < len(t2.rows[ri2+1].cells):
+                                t2.rows[ri2+1].cells[ci].text = ct
+                    doc.add_paragraph()
+                else:
+                    for bl in block:
+                        doc.add_paragraph(bl.strip())
+            elif _re.match(r"^\d+\.\s", stripped):
+                p = doc.add_paragraph(style="List Number")
+                _ts_inline_bold(p, stripped[stripped.index(". ") + 2:])
+                i += 1
+            elif stripped.startswith("- ") or stripped.startswith("* "):
+                p = doc.add_paragraph(style="List Bullet")
+                _ts_inline_bold(p, stripped[2:])
+                i += 1
+            elif stripped.startswith("**") and stripped.endswith("**") and len(stripped) > 4:
+                p = doc.add_paragraph()
+                p.add_run(stripped.strip("*")).bold = True
+                i += 1
+            elif stripped == "" or stripped.startswith("---"):
+                doc.add_paragraph()
+                i += 1
+            else:
+                if stripped:
+                    p = doc.add_paragraph()
+                    _ts_inline_bold(p, stripped)
+                i += 1
+    else:
+        doc.add_paragraph("No AI interpretation available.")
+
+    # ---- Footer ----
+    f = doc.add_paragraph()
+    f.add_run("Generated by EOIL — AI-Native Earth Observation Innovation Lab").italic = True
+
+    buf = _io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
 # The Time Series Explorer renders first and calls st.stop() when active.
 # That prevents the EO Explorer code below from running.
 # The EO Explorer code needs no indentation changes — it just runs when
@@ -516,6 +694,8 @@ has shifted across the full period.
         ("ts_result_dataset", None), ("ts_result_region", None),
         ("ts_result_start",   None), ("ts_result_end",    None),
         ("ts_is_sample", True),
+        ("ts_ai_result", None), ("ts_ai_model", None),
+        ("ts_chart_ts", None), ("ts_chart_seasonal", None), ("ts_chart_annual", None),
     ]:
         if _k not in st.session_state:
             st.session_state[_k] = _v
@@ -567,6 +747,31 @@ has shifted across the full period.
                 st.session_state.ts_result_start   = p["start"]
                 st.session_state.ts_result_end     = p["end"]
                 st.session_state.ts_is_sample      = is_sample
+                st.session_state.ts_ai_result      = None
+                st.session_state.ts_ai_model       = None
+
+                # Pre-render charts as PNG bytes for Word export.
+                # Width/height set to match Word page proportions (6.5" × 3" at 150dpi).
+                _eb = p["end"] - max(1, (p["end"] - p["start"]) // 4)
+                _sb = p["start"] + max(1, (p["end"] - p["start"]) // 4)
+                try:
+                    _fig_ts  = gee_timeseries.build_timeseries_chart(df, stats, p["dataset"], p["region"], p["start"], p["end"])
+                    _fig_ts.update_layout(width=780, height=340, margin=dict(l=55, r=25, t=50, b=45))
+                    st.session_state.ts_chart_ts = _fig_ts.to_image(format="png", scale=1.8)
+                except Exception:
+                    st.session_state.ts_chart_ts = None
+                try:
+                    _fig_sea = gee_timeseries.build_seasonal_chart(stats, p["dataset"])
+                    _fig_sea.update_layout(width=560, height=300, margin=dict(l=55, r=20, t=50, b=40))
+                    st.session_state.ts_chart_seasonal = _fig_sea.to_image(format="png", scale=1.8)
+                except Exception:
+                    st.session_state.ts_chart_seasonal = None
+                try:
+                    _fig_ann = gee_timeseries.build_annual_means_chart(df, p["dataset"], p["start"], p["end"], _sb, _eb)
+                    _fig_ann.update_layout(width=780, height=300, margin=dict(l=55, r=20, t=50, b=45))
+                    st.session_state.ts_chart_annual = _fig_ann.to_image(format="png", scale=1.8)
+                except Exception:
+                    st.session_state.ts_chart_annual = None
 
                 # Reset AI prompt to match the new region and dataset
                 st.session_state.ts_ai_prompt = (
@@ -700,16 +905,56 @@ has shifted across the full period.
         )
         if st.button("Get AI Interpretation", type="primary", key="ts_ai_btn"):
             with st.spinner("Thinking..."):
-                interpretation = gee_timeseries.get_ai_interpretation(
+                interpretation, model_used = gee_timeseries.get_ai_interpretation(
                     stats, r_ds, r_reg, r_start, r_end,
                     custom_prompt=ts_user_prompt,
                     groq_key=config.GROQ_API_KEY,
                     gemini_key=config.GEMINI_API_KEY,
                 )
                 st.session_state.ts_ai_result = interpretation
+                st.session_state.ts_ai_model  = model_used
 
-        if "ts_ai_result" in st.session_state and st.session_state.ts_ai_result:
-            st.markdown(st.session_state.ts_ai_result)
+        if st.session_state.get("ts_ai_result"):
+            with st.expander("📋 AI Interpretation", expanded=True):
+                st.markdown(st.session_state.ts_ai_result)
+                _ts_model = st.session_state.get("ts_ai_model")
+                if _ts_model:
+                    st.caption(f"AI response from **{_ts_model}**")
+                else:
+                    st.caption("Showing built-in interpretation. Add GROQ_API_KEY or GEMINI_API_KEY to enable AI.")
+
+            # Download buttons
+            _ts_safe = f"{r_ds.replace(' ', '_').replace('/', '-')}_{r_reg.replace(' ', '_').replace(',', '')[:25]}_{r_start}_{r_end}"
+            _ts_dc1, _ts_dc2 = st.columns([1, 1])
+            with _ts_dc1:
+                st.download_button(
+                    label="⬇ Download as Markdown",
+                    data=st.session_state.ts_ai_result,
+                    file_name=f"timeseries_{_ts_safe}.md",
+                    mime="text/markdown",
+                    key="ts_dl_md",
+                )
+            with _ts_dc2:
+                _ts_docx = build_timeseries_docx(
+                    ai_text=st.session_state.ts_ai_result,
+                    dataset=r_ds,
+                    region=r_reg,
+                    start_year=r_start,
+                    end_year=r_end,
+                    stats=stats,
+                    unit=unit,
+                    model_name=st.session_state.get("ts_ai_model", ""),
+                    chart_ts=st.session_state.get("ts_chart_ts"),
+                    chart_seasonal=st.session_state.get("ts_chart_seasonal"),
+                    chart_annual=st.session_state.get("ts_chart_annual"),
+                )
+                st.download_button(
+                    label="⬇ Download as Word (.docx)",
+                    data=_ts_docx,
+                    file_name=f"timeseries_{_ts_safe}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="ts_dl_docx",
+                )
 
         section_break()
 

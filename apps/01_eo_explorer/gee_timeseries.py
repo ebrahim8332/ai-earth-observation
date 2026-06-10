@@ -931,9 +931,9 @@ def get_ai_interpretation(stats, dataset_key, region_name, start_year, end_year,
         )
         text, model = ai_chain.complete(full_prompt, groq_key=groq_key, gemini_key=gemini_key)
         if text:
-            return text
+            return text, model
 
-    return _get_fallback_interpretation(stats, dataset_key, region_name)
+    return _get_fallback_interpretation(stats, dataset_key, region_name), None
 
 
 def _get_fallback_interpretation(stats, dataset_key, region_name):
