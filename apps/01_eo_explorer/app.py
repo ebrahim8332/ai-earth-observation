@@ -353,11 +353,151 @@ only in the {r_wl} range.
 # Time Series Explorer helpers (Word document builder)
 # ---------------------------------------------------------------------------
 
-def _plotly_to_png(fig, width, height):
-    """Render a Plotly figure to PNG bytes at the given pixel size."""
-    fig.update_layout(width=width, height=height,
-                      margin=dict(l=55, r=25, t=50, b=45))
-    return fig.to_image(format="png", scale=2)
+def _ts_timeseries_png(df, stats, dataset, region, start_year, end_year):
+    """Matplotlib time series chart: raw values, smoothed, and trend line."""
+    import io as _io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as _np
+
+    unit  = gee_timeseries.DATASETS[dataset]["unit"]
+    color = gee_timeseries.DATASETS[dataset]["chart_color"]
+
+    fig, ax = plt.subplots(figsize=(7.2, 3.2))
+
+    dates = df["date"].values
+    vals  = df["value"].values
+
+    # Raw values
+    ax.plot(dates, vals, color=color, linewidth=0.8, alpha=0.35, label=f"{unit} (raw)")
+
+    # Smoothed
+    smooth = df.dropna(subset=["value_smooth"])
+    ax.plot(smooth["date"].values, smooth["value_smooth"].values,
+            color=color, linewidth=2.2, label=f"{unit} (smoothed)")
+
+    # Trend line
+    trend_y = _np.poly1d(stats["polyfit_z"])(stats["x_days"])
+    ax.plot(stats["valid_dates"], trend_y, color="red", linewidth=1.5,
+            linestyle="--", label="Linear trend")
+
+    direction = "Increasing" if stats["slope_per_year"] > 0 else "Decreasing"
+    ax.text(0.01, 0.97,
+            f"Trend: {direction} ({stats['slope_per_year']:+.4f} {unit}/year)",
+            transform=ax.transAxes, fontsize=8, va="top", color="red",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                      edgecolor="red", linewidth=0.8))
+
+    ax.set_title(f"{region} — {dataset} {start_year}–{end_year}", fontsize=9.5)
+    ax.set_xlabel("Date", fontsize=8)
+    ax.set_ylabel(unit, fontsize=8)
+    ax.tick_params(labelsize=7)
+    ax.legend(fontsize=7, loc="upper right")
+    ax.grid(True, alpha=0.3, linestyle="--")
+    fig.autofmt_xdate(rotation=30, ha="right")
+
+    buf = _io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+def _ts_seasonal_png(stats, dataset):
+    """Matplotlib seasonal cycle bar chart: average value by calendar month."""
+    import io as _io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    unit    = gee_timeseries.DATASETS[dataset]["unit"]
+    color   = gee_timeseries.DATASETS[dataset]["chart_color"]
+    monthly = stats["monthly_avg"]
+    labels  = ["Jan","Feb","Mar","Apr","May","Jun",
+               "Jul","Aug","Sep","Oct","Nov","Dec"]
+    values  = [monthly.get(m, 0) for m in range(1, 13)]
+
+    peak_val   = max(values)
+    trough_val = min(values)
+    bar_colors = []
+    for v in values:
+        if v == peak_val:
+            bar_colors.append("#004d00" if "NDVI" in dataset else "#8b0000")
+        elif v == trough_val:
+            bar_colors.append("#c8a060")
+        else:
+            bar_colors.append(color)
+
+    fig, ax = plt.subplots(figsize=(5.2, 2.8))
+    ax.bar(labels, values, color=bar_colors)
+    ax.set_title(f"Average seasonal cycle — {dataset}", fontsize=9.5)
+    ax.set_xlabel("Month", fontsize=8)
+    ax.set_ylabel(f"Mean {unit}", fontsize=8)
+    ax.tick_params(labelsize=7)
+    ax.grid(True, axis="y", alpha=0.3, linestyle="--")
+
+    buf = _io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+def _ts_annual_png(df, stats, dataset, start_year, end_year):
+    """Matplotlib annual means bar chart, colour-coded by period."""
+    import io as _io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as _np
+
+    unit = gee_timeseries.DATASETS[dataset]["unit"]
+    early_boundary  = start_year + max(1, (end_year - start_year) // 4)
+    recent_boundary = end_year   - max(1, (end_year - start_year) // 4)
+
+    _df = df.copy()
+    _df["year"] = _df["date"].dt.year
+    annual = _df.groupby("year")["value"].mean().reset_index()
+    annual.columns = ["year", "mean"]
+    overall_mean = annual["mean"].mean()
+
+    def bar_colour(y):
+        if y <= early_boundary:   return "#4a90d9"
+        elif y >= recent_boundary: return "#2d7a2d"
+        else:                      return "#b0b8c1"
+
+    colours = [bar_colour(y) for y in annual["year"]]
+    x_labels = [str(y) for y in annual["year"]]
+
+    fig, ax = plt.subplots(figsize=(7.2, 2.8))
+    ax.bar(x_labels, annual["mean"], color=colours)
+    ax.axhline(overall_mean, color="#e67e22", linewidth=1.4, linestyle="--",
+               label=f"Overall mean ({overall_mean:.3f})")
+
+    from matplotlib.patches import Patch
+    legend_els = [
+        Patch(facecolor="#4a90d9", label=f"Early period (≤{early_boundary})"),
+        Patch(facecolor="#2d7a2d", label=f"Recent period (≥{recent_boundary})"),
+        Patch(facecolor="#b0b8c1", label="Transitional"),
+    ]
+    ax.legend(handles=legend_els, fontsize=6.5, loc="upper right")
+
+    ax.set_title(f"Annual mean {dataset}", fontsize=9.5)
+    ax.set_xlabel("Year", fontsize=8)
+    ax.set_ylabel(f"Mean {unit}", fontsize=8)
+    ax.tick_params(labelsize=7)
+    plt.xticks(rotation=45, ha="right")
+    ax.grid(True, axis="y", alpha=0.3, linestyle="--")
+
+    buf = _io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
 
 
 def build_timeseries_docx(ai_text, dataset, region, start_year, end_year,
@@ -436,24 +576,14 @@ def build_timeseries_docx(ai_text, dataset, region, start_year, end_year,
 
     doc.add_paragraph()
 
-    # ---- Charts — rendered on demand from df + stats ----
-    # Annual chart boundaries mirror the same formula used in the portal display.
-    _eb = end_year   - max(1, (end_year - start_year) // 4)
-    _sb = start_year + max(1, (end_year - start_year) // 4)
-
+    # ---- Charts — rendered with matplotlib (no browser required) ----
     chart_specs = [
         ("Time Series",
-         lambda: _plotly_to_png(
-             gee_timeseries.build_timeseries_chart(df, stats, dataset, region, start_year, end_year),
-             780, 340)),
+         lambda: _ts_timeseries_png(df, stats, dataset, region, start_year, end_year)),
         ("Seasonal Cycle",
-         lambda: _plotly_to_png(
-             gee_timeseries.build_seasonal_chart(stats, dataset),
-             560, 300)),
+         lambda: _ts_seasonal_png(stats, dataset)),
         ("Annual Comparison",
-         lambda: _plotly_to_png(
-             gee_timeseries.build_annual_means_chart(df, dataset, start_year, end_year, _sb, _eb),
-             780, 300)),
+         lambda: _ts_annual_png(df, stats, dataset, start_year, end_year)),
     ]
 
     for heading, render_fn in chart_specs:
