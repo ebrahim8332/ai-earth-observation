@@ -2474,35 +2474,41 @@ def _em_static_map_bytes(bbox, region_name=""):
 def _em_combined_map_bytes(thumb_bytes, bbox, region_name=""):
     """Overlay the GEE concentration thumbnail on a contextily basemap.
 
+    The GEE thumbnail is rendered by GEE for pad_bbox(bbox) — the expanded
+    region used in all TROPOMI fetches. We must use that exact same extent
+    for the contextily basemap so the two layers align correctly.
+
     Steps:
-      1. Open the GEE PNG and make near-white (no-data) pixels transparent.
-      2. Draw a contextily basemap in Web Mercator.
-      3. Overlay the concentration image using imshow, aligned to the bbox.
-      4. Return the combined PNG bytes.
+      1. Expand bbox with pad_bbox() — same expansion GEE used for the thumb.
+      2. Make near-white (no-data/cloud) pixels transparent using Pillow.
+      3. Draw a contextily basemap covering exactly the padded extent.
+      4. Overlay the concentration image with imshow using the same extent.
+      5. Return the combined PNG bytes.
     """
     import io as _io
-    import math
     import numpy as _np
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import matplotlib.patheffects as pe
+    import matplotlib.patches as _mp
     from PIL import Image
     import contextily as ctx
 
-    min_lon, min_lat, max_lon, max_lat = bbox
+    # Use the same padded bbox that GEE used when rendering the thumbnail
+    padded = methane_explorer.pad_bbox(list(bbox))
+    min_lon, min_lat, max_lon, max_lat = padded
 
-    # Convert bbox to Web Mercator for contextily
+    # Convert padded bbox corners to Web Mercator (EPSG:3857)
     x_min, y_min = _lonlat_to_webmercator(min_lon, min_lat)
     x_max, y_max = _lonlat_to_webmercator(max_lon, max_lat)
-    pad_x = max((x_max - x_min) * 0.25, 20000)
-    pad_y = max((y_max - y_min) * 0.25, 20000)
 
     fig, ax = plt.subplots(figsize=(5.5, 4.2))
-    ax.set_xlim(x_min - pad_x, x_max + pad_x)
-    ax.set_ylim(y_min - pad_y, y_max + pad_y)
+    # Set extent to exactly the padded region — no extra padding
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
 
-    # Basemap tiles
+    # Basemap tiles — same extent as the GEE thumbnail
     try:
         ctx.add_basemap(
             ax, crs="EPSG:3857",
@@ -2512,40 +2518,33 @@ def _em_combined_map_bytes(thumb_bytes, bbox, region_name=""):
     except Exception:
         ax.set_facecolor("#d6e4f0")
 
-    # Make white / near-white pixels in the GEE thumbnail transparent
+    # Make white / near-white pixels in the GEE thumbnail transparent.
+    # GEE renders masked pixels (clouds, no data) as white (#ffffff).
     gee_img = Image.open(_io.BytesIO(thumb_bytes)).convert("RGBA")
     data = _np.array(gee_img, dtype=_np.uint8)
     r, g, b = data[:, :, 0], data[:, :, 1], data[:, :, 2]
     white_mask = (r > 235) & (g > 235) & (b > 235)
-    data[white_mask, 3] = 0   # transparent
+    data[white_mask, 3] = 0
     gee_rgba = Image.fromarray(data)
 
-    # Overlay concentration image aligned to the bbox extent (Web Mercator)
+    # Overlay the concentration layer — extent matches exactly the basemap
     ax.imshow(
         gee_rgba,
         extent=[x_min, x_max, y_min, y_max],
         origin="upper",
         alpha=0.72,
         zorder=3,
-        interpolation="nearest",
+        interpolation="bilinear",
     )
 
-    # Thin region border
-    import matplotlib.patches as _mp
-    border = _mp.Rectangle(
-        (x_min, y_min), x_max - x_min, y_max - y_min,
-        linewidth=1.5, edgecolor="#c0392b", facecolor="none", zorder=4,
-    )
-    ax.add_patch(border)
-
-    # Region label
+    # Region label centred at top
     if region_name:
         short = region_name[:40] + ("…" if len(region_name) > 40 else "")
         cx_m = (x_min + x_max) / 2
         ax.text(
-            cx_m, y_max + pad_y * 0.06,
-            short, ha="center", va="bottom",
-            fontsize=8, color="#1a1a1a", fontweight="bold",
+            cx_m, y_max - (y_max - y_min) * 0.04,
+            short, ha="center", va="top",
+            fontsize=8.5, color="#1a1a1a", fontweight="bold",
             path_effects=[pe.withStroke(linewidth=2.5, foreground="white")],
             zorder=5,
         )
