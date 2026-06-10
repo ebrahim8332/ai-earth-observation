@@ -13,6 +13,7 @@ v1.6  Day 10: AI Imagery Interpreter added (sixth sidebar entry)
 v1.7  Day 11: Shared map picker added to all five modules; aspect ratio fix for contact sheet and large radius renders
 v1.8  Day 12: Emissions Explorer added (TROPOMI CH4/NO2/CO/SO2 via GEE)
 v1.9  Arc 1:  Land Cover Intelligence added (K-means + Random Forest on Sentinel-2 via Planetary Computer)
+v2.0  Arc 3:  Flood Intelligence added (Sentinel-1 SAR flood detection, NDWI, slope mask, JRC water mask)
 """
 
 import streamlit as st
@@ -36,6 +37,7 @@ import map_picker
 import methane_explorer
 import land_cover
 import corridor_risk
+import flood_intelligence
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -71,7 +73,7 @@ with st.sidebar:
     st.markdown("### Module")
     selected_module = st.radio(
         "Navigate",
-        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer", "🌫️ Emissions Explorer", "🌿 Land Cover Intelligence", "⚠️ Corridor Risk Intelligence"],
+        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer", "🌫️ Emissions Explorer", "🌿 Land Cover Intelligence", "⚠️ Corridor Risk Intelligence", "🌊 Flood Intelligence"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -4014,6 +4016,15 @@ if selected_module == "⚠️ Corridor Risk Intelligence":
     st.stop()
 
 # ---------------------------------------------------------------------------
+# MODULE 9 — Flood Intelligence (Arc 3)
+# SAR-based flood detection and impact mapping via GEE.
+# ---------------------------------------------------------------------------
+
+if selected_module == "🌊 Flood Intelligence":
+    flood_intelligence.render()
+    st.stop()
+
+# ---------------------------------------------------------------------------
 # MODULE 0 — Welcome panel (default when Welcome is selected)
 # ---------------------------------------------------------------------------
 
@@ -4151,7 +4162,7 @@ with col_b:
 
 st.divider()
 st.caption(
-    "EOIL Portal v2.0 — Earth Observation Innovation Lab. Modules: Spectral, Time Series, SAR, Change Detection, AI Imagery Interpreter, Emissions Explorer, Land Cover Intelligence, Corridor Risk Intelligence. "
+    "EOIL Portal v2.0 — Earth Observation Innovation Lab. Modules: Spectral, Time Series, SAR, Change Detection, AI Imagery Interpreter, Emissions Explorer, Land Cover Intelligence, Corridor Risk Intelligence, Flood Intelligence. "
     "Built with Claude Code. "
     "Login and access controls will be added in a future version."
 )
