@@ -2372,8 +2372,8 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
 # MODULE 6 — Emissions Explorer helpers (Word document builder)
 # ---------------------------------------------------------------------------
 
-def _em_static_map_bytes(bbox):
-    """Render a simple bounding-box map as PNG bytes using matplotlib.
+def _em_static_map_bytes(bbox, region_name=""):
+    """Render a clean bounding-box location map as PNG bytes using matplotlib.
 
     bbox is (min_lon, min_lat, max_lon, max_lat).
     Returns PNG bytes for embedding in the Word document.
@@ -2383,58 +2383,91 @@ def _em_static_map_bytes(bbox):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
+    import matplotlib.patheffects as pe
 
     min_lon, min_lat, max_lon, max_lat = bbox
-    pad_lon = max((max_lon - min_lon) * 0.3, 0.5)
-    pad_lat = max((max_lat - min_lat) * 0.3, 0.5)
+    span_lon = max_lon - min_lon
+    span_lat = max_lat - min_lat
 
-    fig, ax = plt.subplots(figsize=(5, 3.5))
-    ax.set_facecolor("#eaf2f8")
-    fig.patch.set_facecolor("#f8fbfd")
+    # Tight padding — just enough to show context without dwarfing the region
+    pad_lon = max(span_lon * 0.45, 0.15)
+    pad_lat = max(span_lat * 0.45, 0.15)
 
-    # Region rectangle
-    rect = mpatches.FancyBboxPatch(
-        (min_lon, min_lat),
-        max_lon - min_lon,
-        max_lat - min_lat,
-        boxstyle="square,pad=0",
-        linewidth=2,
-        edgecolor="#2471a3",
-        facecolor="#aed6f1",
-        alpha=0.6,
+    fig, ax = plt.subplots(figsize=(5.5, 4))
+    fig.patch.set_facecolor("#1c2b3a")
+    ax.set_facecolor("#263545")
+
+    # Ocean / background grid lines that look like a map graticule
+    ax.grid(True, color="#344d61", linewidth=0.6, linestyle="-", alpha=0.8, zorder=0)
+
+    # Subtle latitude/longitude reference lines through centre
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    ax.axhline(cy, color="#4a6680", linewidth=0.5, linestyle="--", alpha=0.5, zorder=1)
+    ax.axvline(cx, color="#4a6680", linewidth=0.5, linestyle="--", alpha=0.5, zorder=1)
+
+    # Filled region rectangle
+    rect = mpatches.Rectangle(
+        (min_lon, min_lat), span_lon, span_lat,
+        linewidth=0, facecolor="#3498db", alpha=0.35, zorder=2,
     )
     ax.add_patch(rect)
 
-    # Centre marker
-    cx = (min_lon + max_lon) / 2
-    cy = (min_lat + max_lat) / 2
-    ax.plot(cx, cy, "o", color="#1a5276", markersize=6, zorder=5)
+    # Region border
+    border = mpatches.Rectangle(
+        (min_lon, min_lat), span_lon, span_lat,
+        linewidth=2.0, edgecolor="#5dade2", facecolor="none", zorder=3,
+    )
+    ax.add_patch(border)
 
-    # Axis limits with padding
+    # Centre crosshair marker
+    ax.plot(cx, cy, "+", color="#f0f4f8", markersize=10, markeredgewidth=1.8, zorder=5)
+    ax.plot(cx, cy, "o", color="#e74c3c", markersize=5, zorder=6)
+
+    # Region name label above the box
+    if region_name:
+        short = region_name[:35] + ("…" if len(region_name) > 35 else "")
+        ax.text(
+            cx, max_lat + pad_lat * 0.18,
+            short,
+            ha="center", va="bottom",
+            fontsize=8, color="#f0f4f8", fontweight="bold",
+            path_effects=[pe.withStroke(linewidth=2, foreground="#1c2b3a")],
+            zorder=7,
+        )
+
+    # Bounding-box coordinate callouts at two corners (outside the box)
+    ax.annotate(
+        f"{abs(min_lat):.2f}°{'S' if min_lat < 0 else 'N'} {abs(min_lon):.2f}°{'W' if min_lon < 0 else 'E'}",
+        xy=(min_lon, min_lat),
+        xytext=(min_lon - pad_lon * 0.05, min_lat - pad_lat * 0.15),
+        fontsize=6.5, color="#a8c8e8", ha="left", va="top", zorder=7,
+        path_effects=[pe.withStroke(linewidth=1.5, foreground="#1c2b3a")],
+    )
+    ax.annotate(
+        f"{abs(max_lat):.2f}°{'S' if max_lat < 0 else 'N'} {abs(max_lon):.2f}°{'W' if max_lon < 0 else 'E'}",
+        xy=(max_lon, max_lat),
+        xytext=(max_lon + pad_lon * 0.05, max_lat + pad_lat * 0.12),
+        fontsize=6.5, color="#a8c8e8", ha="right", va="bottom", zorder=7,
+        path_effects=[pe.withStroke(linewidth=1.5, foreground="#1c2b3a")],
+    )
+
     ax.set_xlim(min_lon - pad_lon, max_lon + pad_lon)
     ax.set_ylim(min_lat - pad_lat, max_lat + pad_lat)
 
-    ax.set_xlabel("Longitude", fontsize=8)
-    ax.set_ylabel("Latitude", fontsize=8)
-    ax.tick_params(labelsize=7)
-    ax.grid(True, linestyle="--", alpha=0.4)
-    ax.set_title("Analysis region", fontsize=9, pad=6)
+    ax.set_xlabel("Longitude", fontsize=7.5, color="#7fb3d3", labelpad=4)
+    ax.set_ylabel("Latitude",  fontsize=7.5, color="#7fb3d3", labelpad=4)
+    ax.tick_params(colors="#7fb3d3", labelsize=7)
+    for spine in ax.spines.values():
+        spine.set_edgecolor("#4a6680")
 
-    # Corner coordinate labels
-    ax.annotate(
-        f"{min_lat:.2f}°N, {min_lon:.2f}°E",
-        xy=(min_lon, min_lat), xytext=(4, 4),
-        textcoords="offset points", fontsize=6, color="#1a5276"
-    )
-    ax.annotate(
-        f"{max_lat:.2f}°N, {max_lon:.2f}°E",
-        xy=(max_lon, max_lat), xytext=(-4, -8),
-        textcoords="offset points", fontsize=6, color="#1a5276", ha="right"
-    )
+    ax.set_title("Analysis Region", fontsize=9.5, color="#cde4f5",
+                 fontweight="bold", pad=8)
 
     buf = _io.BytesIO()
-    plt.tight_layout()
-    plt.savefig(buf, format="png", dpi=130, bbox_inches="tight")
+    plt.tight_layout(pad=0.8)
+    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight",
+                facecolor=fig.get_facecolor())
     plt.close(fig)
     buf.seek(0)
     return buf.read()
@@ -2529,7 +2562,7 @@ def build_emissions_docx(ai_text, gas_name, region, actual_date,
         h2 = doc.add_paragraph("Region Map")
         h2.style = doc.styles["Heading 1"]
         try:
-            png_bytes = _em_static_map_bytes(bbox)
+            png_bytes = _em_static_map_bytes(bbox, region_name=region)
             img_buf = _io.BytesIO(png_bytes)
             doc.add_picture(img_buf, width=Inches(4.5))
             doc.add_paragraph()
