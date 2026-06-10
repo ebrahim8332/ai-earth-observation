@@ -2471,7 +2471,7 @@ def _em_static_map_bytes(bbox, region_name=""):
     return buf.read()
 
 
-def _em_combined_map_bytes(thumb_bytes, bbox, region_name=""):
+def _em_combined_map_bytes(thumb_bytes, bbox, region_name="", gas_cfg=None):
     """Overlay the GEE concentration thumbnail on a contextily basemap.
 
     The GEE thumbnail is rendered by GEE for pad_bbox(bbox) — the expanded
@@ -2553,6 +2553,27 @@ def _em_combined_map_bytes(thumb_bytes, bbox, region_name=""):
     ax.set_title("Concentration Map", fontsize=9.5, fontweight="bold",
                  color="#222222", pad=6)
 
+    # Colorbar at the bottom using the GAS_CONFIG palette and value range
+    if gas_cfg:
+        import matplotlib.colors as mcolors
+        import matplotlib.cm as mcm
+
+        palette      = gas_cfg.get("palette", [])
+        vmin         = gas_cfg.get("min_val", 0) * gas_cfg.get("display_scale", 1)
+        vmax         = gas_cfg.get("max_val", 1) * gas_cfg.get("display_scale", 1)
+        display_unit = gas_cfg.get("display_unit", gas_cfg.get("unit", ""))
+
+        cmap = mcolors.LinearSegmentedColormap.from_list("gas_cmap", palette, N=256)
+        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        sm   = mcm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+
+        cbar = fig.colorbar(sm, ax=ax, orientation="horizontal",
+                            fraction=0.04, pad=0.02, aspect=30)
+        cbar.set_label(display_unit, fontsize=7.5, color="#333333")
+        cbar.ax.tick_params(labelsize=7, colors="#333333")
+        cbar.outline.set_edgecolor("#bbbbbb")
+
     buf = _io.BytesIO()
     plt.tight_layout(pad=0.5)
     plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
@@ -2574,7 +2595,7 @@ def _em_add_inline_bold(paragraph, text):
 
 def build_emissions_docx(ai_text, gas_name, region, actual_date,
                           mean_val, pass_count, disp_unit, conf_string,
-                          model_name="", bbox=None, thumb_bytes=None):
+                          model_name="", bbox=None, thumb_bytes=None, gas_cfg=None):
     """Build a Word document for the Emissions Explorer result.
 
     Sections:
@@ -2660,7 +2681,7 @@ def build_emissions_docx(ai_text, gas_name, region, actual_date,
     try:
         if thumb_bytes and bbox and len(bbox) == 4:
             # Concentration layer overlaid on real basemap tiles
-            png = _em_combined_map_bytes(thumb_bytes, bbox, region_name=region)
+            png = _em_combined_map_bytes(thumb_bytes, bbox, region_name=region, gas_cfg=gas_cfg)
         elif bbox and len(bbox) == 4:
             # Basemap only (fallback if GEE thumb unavailable)
             png = _em_static_map_bytes(bbox, region_name=region)
@@ -3075,6 +3096,7 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
                     model_name=_em_model,
                     bbox=_em_bbox,
                     thumb_bytes=st.session_state.get("em_result_thumb"),
+                    gas_cfg=cfg,
                 )
                 st.download_button(
                     label="⬇ Download as Word (.docx)",
