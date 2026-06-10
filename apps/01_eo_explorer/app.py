@@ -2290,7 +2290,7 @@ def _cd_add_inline_bold(para, text):
             para.add_run(part)
 
 
-def build_change_docx(region, date1, date2, src1, src2, stats, ai_text, ai_model):
+def build_change_docx(region, date1, date2, src1, src2, stats, ai_text, ai_model, thumbs=None):
     """Build a Word document for the Change Detection module."""
     import io as _io
     from docx import Document as _Document
@@ -2350,6 +2350,42 @@ def build_change_docx(region, date1, date2, src1, src2, stats, ai_text, ai_model
         row_cells[1].text = value
 
     doc.add_paragraph()
+
+    # NDVI thumbnails — 1×3 row (NDVI D1, NDVI D2, Change)
+    _cd_thumbs_inner = thumbs or {}
+    _cd_thumb_keys   = ["ndvi1", "ndvi2", "diff"]
+    _cd_thumb_labels = [f"NDVI — {date1}", f"NDVI — {date2}", "NDVI Change"]
+    _cd_any_thumb    = any(_cd_thumbs_inner.get(k) for k in _cd_thumb_keys)
+    if _cd_any_thumb:
+        doc.add_heading("NDVI Thumbnails", level=1)
+        from docx.shared import Inches as _Inches
+        from docx.oxml import OxmlElement as _OxmlElement2
+        from docx.oxml.ns import qn as _qn2
+        import io as _io2
+        tbl_t = doc.add_table(rows=2, cols=3)
+        # Remove all borders
+        for row in tbl_t.rows:
+            for cell in row.cells:
+                tc = cell._tc
+                tcPr = tc.get_or_add_tcPr()
+                tcBorders = _OxmlElement2("w:tcBorders")
+                for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                    border = _OxmlElement2(f"w:{side}")
+                    border.set(_qn2("w:val"), "none")
+                    tcBorders.append(border)
+                tcPr.append(tcBorders)
+        for col_idx, (key, label) in enumerate(zip(_cd_thumb_keys, _cd_thumb_labels)):
+            tb_bytes = _cd_thumbs_inner.get(key)
+            img_cell  = tbl_t.rows[0].cells[col_idx]
+            cap_cell  = tbl_t.rows[1].cells[col_idx]
+            if tb_bytes:
+                img_para = img_cell.paragraphs[0]
+                run = img_para.add_run()
+                run.add_picture(_io2.BytesIO(tb_bytes), width=_Inches(1.9))
+            else:
+                img_cell.paragraphs[0].add_run("Not available")
+            cap_cell.paragraphs[0].add_run(label).bold = True
+        doc.add_paragraph()
 
     # AI Interpretation
     if ai_text:
@@ -2565,6 +2601,7 @@ in the top-right corner of the map.
         ("cd_result_region", None), ("cd_result_date1",  None),
         ("cd_result_date2",  None), ("cd_result_src1",   None),
         ("cd_result_src2",   None), ("cd_ai_result",     None), ("cd_ai_model", None),
+        ("cd_thumbs",        None),
     ]:
         if _k not in st.session_state:
             st.session_state[_k] = _v
@@ -2621,6 +2658,12 @@ in the top-right corner of the map.
             st.session_state.cd_result_date2  = p["date2"]
             st.session_state.cd_result_src1   = src1
             st.session_state.cd_result_src2   = src2
+            st.session_state.cd_ai_result     = None
+            st.session_state.cd_ai_model      = None
+            with st.spinner("Fetching NDVI thumbnails for export..."):
+                st.session_state.cd_thumbs = gee_change.get_change_thumbnails(
+                    img1, img2, p["bbox"]
+                )
             st.success(
                 f"Analysis complete — {p['date1']} and {p['date2']} over {p['region']}. "
                 f"Date 1 source: {src1}. Date 2 source: {src2}."
@@ -2737,6 +2780,23 @@ in the top-right corner of the map.
         else:
             st.warning("Map could not be built. Check GEE connection.")
 
+        # Thumbnail row
+        _cd_thumbs = st.session_state.get("cd_thumbs") or {}
+        if any(_cd_thumbs.get(k) for k in ("ndvi1", "ndvi2", "diff")):
+            st.markdown("**NDVI thumbnails**")
+            _tc1, _tc2, _tc3 = st.columns(3)
+            _thumb_labels = {
+                "ndvi1": f"NDVI — {r_d1}",
+                "ndvi2": f"NDVI — {r_d2}",
+                "diff":  "NDVI Change",
+            }
+            for _col, _key in zip((_tc1, _tc2, _tc3), ("ndvi1", "ndvi2", "diff")):
+                _tb = _cd_thumbs.get(_key)
+                if _tb:
+                    _col.image(_tb, caption=_thumb_labels[_key], use_container_width=True)
+                else:
+                    _col.caption(f"{_thumb_labels[_key]}: not available")
+
         cd_section_break()
 
         # --- SECTION 3: AI Interpretation ---
@@ -2806,6 +2866,7 @@ in the top-right corner of the map.
                     stats,
                     st.session_state.cd_ai_result,
                     st.session_state.get("cd_ai_model"),
+                    thumbs=st.session_state.get("cd_thumbs") or {},
                 )
                 st.download_button(
                     label="⬇️ Download Word Doc",

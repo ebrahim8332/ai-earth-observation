@@ -346,6 +346,54 @@ def _empty_stats():
 
 
 # ---------------------------------------------------------------------------
+# Thumbnail fetcher
+# ---------------------------------------------------------------------------
+
+def get_change_thumbnails(img1, img2, bbox, size=400):
+    """Fetch three static PNG thumbnails from GEE: NDVI Date 1, NDVI Date 2, NDVI Diff.
+
+    Returns a dict with keys 'ndvi1', 'ndvi2', 'diff' — each is bytes or None.
+    """
+    import requests as _requests
+    import ee
+
+    bbox = _pad_bbox(bbox)
+    west, south, east, north = bbox
+    region = ee.Geometry.Rectangle([west, south, east, north])
+
+    ndvi_vis = {
+        "bands":   ["NDVI"],
+        "min":     0.0,
+        "max":     0.9,
+        "palette": ["#f7fcf0", "#74c476", "#00441b"],
+    }
+    diff_vis = {
+        "bands":   ["NDVI_diff"],
+        "min":     -0.5,
+        "max":      0.5,
+        "palette": ["#d73027", "#f7f7f7", "#1a9850"],
+    }
+
+    diff_img = img2.subtract(img1).rename("NDVI_diff")
+
+    results = {}
+    specs = [
+        ("ndvi1", img1,     ndvi_vis),
+        ("ndvi2", img2,     ndvi_vis),
+        ("diff",  diff_img, diff_vis),
+    ]
+    for key, img, vis in specs:
+        try:
+            params = {**vis, "region": region, "dimensions": size, "format": "png"}
+            url  = img.getThumbURL(params)
+            resp = _requests.get(url, timeout=30)
+            results[key] = resp.content if resp.status_code == 200 else None
+        except Exception:
+            results[key] = None
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Folium map builder
 # ---------------------------------------------------------------------------
 
