@@ -315,6 +315,42 @@ def build_emissions_map(image, gas_key, bbox, actual_date):
 
 
 # ---------------------------------------------------------------------------
+# Static concentration thumbnail (for Word document export)
+# ---------------------------------------------------------------------------
+
+def get_concentration_thumb(image, gas_key, bbox, size=512):
+    """Fetch a static PNG of the gas concentration layer from GEE.
+
+    Calls getThumbURL() with the same vis_params used for the Folium map,
+    then fetches the PNG with requests. Returns PNG bytes, or None on failure.
+
+    The output is the same colour-mapped concentration image shown in the
+    interactive map — suitable for embedding in a Word document.
+    """
+    import requests as _requests
+    cfg  = GAS_CONFIG[gas_key]
+    bbox = pad_bbox(bbox)
+    west, south, east, north = bbox
+
+    try:
+        thumb_url = image.getThumbURL({
+            "bands":   [cfg["band"]],
+            "min":     cfg["min_val"],
+            "max":     cfg["max_val"],
+            "palette": cfg["palette"],
+            "region":  ee.Geometry.Rectangle([west, south, east, north]),
+            "dimensions": size,
+            "format":  "png",
+        })
+        resp = _requests.get(thumb_url, timeout=30)
+        if resp.status_code == 200:
+            return resp.content
+        return None
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # AI interpretation
 # ---------------------------------------------------------------------------
 

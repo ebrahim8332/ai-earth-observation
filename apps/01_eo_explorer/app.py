@@ -2484,13 +2484,13 @@ def _em_add_inline_bold(paragraph, text):
 
 def build_emissions_docx(ai_text, gas_name, region, actual_date,
                           mean_val, pass_count, disp_unit, conf_string,
-                          model_name="", bbox=None):
+                          model_name="", bbox=None, thumb_bytes=None):
     """Build a Word document for the Emissions Explorer result.
 
     Sections:
       1. Title and metadata
       2. Statistics block
-      3. Region map (matplotlib bounding-box figure)
+      3. Concentration map (GEE thumbnail if available, basemap fallback)
       4. AI Interpretation (markdown → Word formatting)
 
     Returns bytes ready for st.download_button.
@@ -2555,17 +2555,27 @@ def build_emissions_docx(ai_text, gas_name, region, actual_date,
 
     doc.add_paragraph()  # spacer
 
-    # ---- Region map ----
-    if bbox and len(bbox) == 4:
-        h2 = doc.add_paragraph("Region Map")
-        h2.style = doc.styles["Heading 1"]
-        try:
-            png_bytes = _em_static_map_bytes(bbox, region_name=region)
-            img_buf = _io.BytesIO(png_bytes)
-            doc.add_picture(img_buf, width=Inches(4.5))
-            doc.add_paragraph()
-        except Exception:
-            doc.add_paragraph("[Map could not be generated]")
+    # ---- Concentration map ----
+    # Use GEE thumbnail (same colours as the interactive map) when available.
+    # Fall back to the contextily basemap if the thumbnail wasn't generated.
+    h2 = doc.add_paragraph("Concentration Map")
+    h2.style = doc.styles["Heading 1"]
+    map_caption = doc.add_paragraph(
+        f"{gas_name} concentration — {actual_date}. "
+        "Colour scale: low (cool) → high (warm). Source: TROPOMI Sentinel-5P / GEE."
+    )
+    map_caption.style = doc.styles["Normal"]
+    map_caption.runs[0].font.size = Pt(8)
+    map_caption.runs[0].font.italic = True
+    try:
+        if thumb_bytes:
+            img_buf = _io.BytesIO(thumb_bytes)
+        else:
+            img_buf = _io.BytesIO(_em_static_map_bytes(bbox, region_name=region) if bbox and len(bbox) == 4 else b"")
+        doc.add_picture(img_buf, width=Inches(4.5))
+        doc.add_paragraph()
+    except Exception:
+        doc.add_paragraph("[Map could not be generated]")
 
     # ---- AI Interpretation ----
     h3 = doc.add_paragraph("AI Interpretation")
@@ -2784,7 +2794,7 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
         ("em_map",            None), ("em_mean_val",       None),
         ("em_actual_date",    None), ("em_pass_count",     None),
         ("em_result_region",  None), ("em_result_gas",     None),
-        ("em_result_bbox",    None),
+        ("em_result_bbox",    None), ("em_result_thumb",   None),
         ("em_ai_result",      None), ("em_ai_model",       None),
     ]:
         if _k not in st.session_state:
@@ -2841,6 +2851,10 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
             st.session_state.em_result_region = p["region"]
             st.session_state.em_result_gas    = p["gas"]
             st.session_state.em_result_bbox   = p["bbox"]
+            # Fetch static concentration thumbnail for Word export
+            st.session_state.em_result_thumb = methane_explorer.get_concentration_thumb(
+                image, p["gas"], p["bbox"]
+            )
             st.success(
                 f"Data loaded — {p['gas']} over {p['region']} "
                 f"(7-day window: {actual_date}, {pass_count} orbital passes)."
@@ -2965,6 +2979,7 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
                     conf_string=_em_conf_str,
                     model_name=_em_model,
                     bbox=_em_bbox,
+                    thumb_bytes=st.session_state.get("em_result_thumb"),
                 )
                 st.download_button(
                     label="⬇ Download as Word (.docx)",
