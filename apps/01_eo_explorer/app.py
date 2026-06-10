@@ -2697,13 +2697,13 @@ in the top-right corner of the map.
             "Region":              r_reg,
             "Date 1":              str(r_d1),
             "Date 2":              str(r_d2),
-            "Area increased km2":  round(stats["area_increased_km2"], 2),
-            "Area decreased km2":  round(stats["area_decreased_km2"], 2),
+            "Area gain km2":       round(stats["area_gain_km2"], 2),
+            "Area loss km2":       round(stats["area_loss_km2"], 2),
             "Area stable km2":     round(stats["area_stable_km2"], 2),
             "Area total km2":      round(stats["area_total_km2"], 2),
             "Net change km2":      round(stats["net_change_km2"], 2),
-            "Pct increased":       round(stats["pct_increased"], 2),
-            "Pct decreased":       round(stats["pct_decreased"], 2),
+            "Pct gain":            round(stats["pct_gain"], 2),
+            "Pct loss":            round(stats["pct_loss"], 2),
             "Pct stable":          round(stats["pct_stable"], 2),
         }
         cd_df    = pd.DataFrame([export_stats])
