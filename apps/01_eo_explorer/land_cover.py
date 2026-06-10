@@ -715,7 +715,8 @@ def _lc_add_inline_bold(para, text):
 def build_land_cover_docx(region, scene_date, scene_cloud,
                           rgb_arr, km_arr, rf_arr,
                           km_result, rf_result,
-                          ai_text, ai_model):
+                          ai_text, ai_model,
+                          agree_pct=None):
     """Build a Word document for the Land Cover Intelligence module.
 
     Sections:
@@ -773,6 +774,42 @@ def build_land_cover_docx(region, scene_date, scene_cloud,
             img_cell.paragraphs[0].add_run("Not available")
         cap_cell.paragraphs[0].add_run(label).bold = True
     doc.add_paragraph()
+
+    # ---- Color legend ----
+    doc.add_heading("Land Cover Color Legend", level=1)
+    leg_tbl = doc.add_table(rows=1, cols=2)
+    leg_tbl.style = "Table Grid"
+    for cell, txt in zip(leg_tbl.rows[0].cells, ["Color", "Land Cover Class"]):
+        cell.text = txt
+        cell.paragraphs[0].runs[0].bold = True
+    for label, hex_color in LAND_COVER_COLORS.items():
+        row = leg_tbl.add_row().cells
+        # Fill the color cell with the land cover color using shading
+        from docx.oxml import OxmlElement as _OxmlEl2
+        from docx.oxml.ns import qn as _qn2
+        tc = row[0]._tc
+        tcPr = tc.get_or_add_tcPr()
+        shd = _OxmlEl2("w:shd")
+        shd.set(_qn2("w:val"), "clear")
+        shd.set(_qn2("w:color"), "auto")
+        shd.set(_qn2("w:fill"), hex_color.lstrip("#"))
+        tcPr.append(shd)
+        row[0].text = ""
+        row[1].text = label
+    doc.add_paragraph()
+
+    # ---- Algorithm agreement ----
+    if agree_pct is not None:
+        doc.add_heading("Algorithm Agreement", level=1)
+        disagree_pct = 100.0 - agree_pct
+        agree_para = doc.add_paragraph()
+        agree_para.add_run("Agreement between K-means and Random Forest: ").bold = False
+        agree_para.add_run(f"{agree_pct:.1f}%").bold = True
+        doc.add_paragraph(
+            f"Disagreement ({disagree_pct:.1f}%) occurs at class boundaries and in "
+            "mixed pixels where the spectral signal does not clearly belong to one class."
+        )
+        doc.add_paragraph()
 
     # ---- K-means cluster statistics ----
     doc.add_heading("K-means Cluster Statistics", level=1)
@@ -1274,6 +1311,12 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
                     key="lc_dl_md",
                 )
             with _lc_c2:
+                _lc_km_int = np.zeros_like(km_result["cluster_map"], dtype=int)
+                for _c, _lbl in km_result["label_map"].items():
+                    _lc_km_int[km_result["cluster_map"] == _c] = LABEL_TO_INT.get(_lbl, 0)
+                _lc_agree_pct = float(
+                    100.0 * (_lc_km_int == rf_result["rf_map"]).sum() / _lc_km_int.size
+                )
                 _lc_docx_bytes = build_land_cover_docx(
                     region=region,
                     scene_date=scene["scene_date"],
@@ -1285,6 +1328,7 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
                     rf_result=rf_result,
                     ai_text=st.session_state.lc_ai,
                     ai_model=st.session_state.get("lc_ai_model", ""),
+                    agree_pct=_lc_agree_pct,
                 )
                 st.download_button(
                     label="⬇️ Download Word Doc",
