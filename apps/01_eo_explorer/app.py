@@ -2780,23 +2780,6 @@ in the top-right corner of the map.
         else:
             st.warning("Map could not be built. Check GEE connection.")
 
-        # Thumbnail row
-        _cd_thumbs = st.session_state.get("cd_thumbs") or {}
-        if any(_cd_thumbs.get(k) for k in ("ndvi1", "ndvi2", "diff")):
-            st.markdown("**NDVI thumbnails**")
-            _tc1, _tc2, _tc3 = st.columns(3)
-            _thumb_labels = {
-                "ndvi1": f"NDVI — {r_d1}",
-                "ndvi2": f"NDVI — {r_d2}",
-                "diff":  "NDVI Change",
-            }
-            for _col, _key in zip((_tc1, _tc2, _tc3), ("ndvi1", "ndvi2", "diff")):
-                _tb = _cd_thumbs.get(_key)
-                if _tb:
-                    _col.image(_tb, caption=_thumb_labels[_key], use_container_width=True)
-                else:
-                    _col.caption(f"{_thumb_labels[_key]}: not available")
-
         cd_section_break()
 
         # --- SECTION 3: AI Interpretation ---
