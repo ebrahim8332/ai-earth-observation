@@ -865,14 +865,16 @@ def compute_index_stats(spectral_sig: dict, satellite_key: str) -> dict:
 
 
 def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> dict:
-    """Fetch per-band statistics from the PC Titiler statistics endpoint.
+    """Fetch each band as a greyscale render and return mean surface reflectance.
 
-    Uses /item/statistics which returns actual DN mean values — no display
-    rescaling, no clipping. One request per band.
+    Uses the PC render API WITHOUT a colormap so pixel values are linearly
+    proportional to DN. With rescale="0,10000": pixel/255 = reflectance directly
+    for Sentinel-2. Clips to bbox so values represent the user's search area,
+    not the full tile.
 
     Returns a dict: band_name -> {'wavelength': int, 'mean_reflectance': float}
     """
-    PC_STATS_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item/statistics"
+    import time
 
     sat = satellite_catalog.SATELLITES[satellite_key]
     if sat.get("sar"):
@@ -880,29 +882,44 @@ def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> d
 
     band_list = _BAND_EXPRESSIONS.get(satellite_key, [])
     wavelengths = _BAND_WAVELENGTHS.get(satellite_key, {})
+
+    # Full-range rescale so NIR over bright vegetation is not clipped.
+    # Sentinel-2: DN/10000 = reflectance → rescale "0,10000" → pixel/255 = reflectance.
+    # Landsat C2L2: reflectance = DN*2.75e-5 - 0.2 (range ~0–1 for DN 7000–44000).
+    if satellite_key == "Landsat 8/9":
+        sig_rescale = "7000,44000"
+    else:
+        sig_rescale = "0,10000"
+
     results = {}
 
     for band in band_list:
         params = [
-            ("collection", sat["collection"]),
-            ("item",       item.id),
-            ("assets",     band),
+            ("collection",    sat["collection"]),
+            ("item",          item.id),
+            ("assets",        band),
+            ("asset_bidx",    f"{band}|1"),
+            ("rescale",       sig_rescale),
+            ("width",         "150"),
+            ("height",        "150"),
         ]
         if bbox:
             params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
         try:
-            resp = requests.get(PC_STATS_URL, params=params, timeout=30)
+            time.sleep(0.3)  # avoid rate-limiting after contact sheet calls
+            resp = requests.get(PC_RENDER_URL, params=params, timeout=30)
             if resp.status_code != 200:
                 continue
-            data = resp.json()
-            # Response is a flat dict: {"B08_b1": {"min":..,"max":..,"mean":..}}
-            # Take the first (and only) entry regardless of key name.
-            band_stats = next(iter(data.values()), None)
-            if band_stats is None or "mean" not in band_stats:
+            arr = np.array(Image.open(BytesIO(resp.content)).convert("L"), dtype=np.float32)
+            # Exclude nodata borders (0) and fully saturated pixels (255)
+            valid = (arr > 2) & (arr < 254)
+            if not valid.any():
                 continue
-            mean_dn = float(band_stats["mean"])
-            if mean_dn <= 0:
-                continue
+            mean_px = float(np.mean(arr[valid]))
+
+            # pixel/255 = (DN - lo) / (hi - lo)
+            lo, hi = [float(x) for x in sig_rescale.split(",")]
+            mean_dn = mean_px / 255.0 * (hi - lo) + lo
 
             if satellite_key == "Landsat 8/9":
                 reflectance = mean_dn * 2.75e-5 - 0.2
