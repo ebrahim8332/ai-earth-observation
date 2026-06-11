@@ -1743,22 +1743,6 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         except Exception:
             st.session_state.se_index_stats = {}
 
-        # ---- Index statistics table ----
-        _idx_stats = st.session_state.se_index_stats or {}
-        _valid_idx = {k: v for k, v in _idx_stats.items() if v}
-        if _valid_idx:
-            st.markdown("#### Spectral Index Values")
-            st.caption("Computed from mean band reflectances. Values are scene averages.")
-            import pandas as pd
-            _idx_rows = []
-            for _iname, _is in _valid_idx.items():
-                _idx_rows.append({
-                    "Index":          _iname,
-                    "Scene Value":    f"{_is['value']:+.3f}",
-                    "Interpretation": _is["interpretation"],
-                })
-            st.dataframe(pd.DataFrame(_idx_rows), use_container_width=True, hide_index=True)
-
         # ---- Spectral signature chart ----
         _sig = st.session_state.se_spectral_sig or {}
         if _sig and not satellite_catalog.SATELLITES.get(_c_sat, {}).get("sar"):
@@ -1766,6 +1750,34 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
             st.caption("Mean reflectance per band — shows how different surface types absorb or reflect each wavelength.")
             _sig_fig = spectral_explorer.build_spectral_signature_chart(_sig, _c_sat)
             st.plotly_chart(_sig_fig, use_container_width=True)
+
+        # ---- Index statistics table ----
+        _idx_stats = st.session_state.se_index_stats or {}
+        _valid_idx = {k: v for k, v in _idx_stats.items() if v}
+
+        _BANDS_USED = {
+            "NDVI": "NIR vs Red",
+            "NDWI": "Green vs NIR",
+            "NDMI": "NIR vs SWIR1",
+            "NBR":  "NIR vs SWIR2",
+            "SAVI": "NIR vs Red",
+            "EVI":  "NIR, Red, Blue",
+            "BSI":  "SWIR1, Red, NIR, Blue",
+        }
+
+        if _valid_idx:
+            st.markdown("#### Spectral Index Values")
+            st.caption("Each index is calculated from the band values shown in the chart above. The Bands Used column tells you which bars to compare.")
+            import pandas as pd
+            _idx_rows = []
+            for _iname, _is in _valid_idx.items():
+                _idx_rows.append({
+                    "Index":          _iname,
+                    "Bands Used":     _BANDS_USED.get(_iname, "—"),
+                    "Scene Value":    f"{_is['value']:+.3f}",
+                    "Interpretation": _is["interpretation"],
+                })
+            st.dataframe(pd.DataFrame(_idx_rows), use_container_width=True, hide_index=True)
 
         # ---- AI Interpretation ----
         if st.button("🤖 AI: Interpret full contact sheet", key="se_ai_contact"):
