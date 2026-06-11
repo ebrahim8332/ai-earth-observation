@@ -1726,8 +1726,10 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         try:
             _computed = spectral_explorer.compute_index_stats(_all_results, _c_sat)
             st.session_state.se_index_stats = _computed if _computed else {}
-        except Exception:
+        except Exception as _e:
             st.session_state.se_index_stats = {}
+        # TEMP DEBUG
+        st.caption(f"all_results count={len(_all_results)}  labels={[r.get('label') for r in _all_results]}  stats={st.session_state.se_index_stats}")
 
         # ---- Compute spectral signature (once per contact sheet run) ----
         if st.session_state.se_spectral_sig is None and st.session_state.se_best_item:
