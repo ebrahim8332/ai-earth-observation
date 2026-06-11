@@ -172,7 +172,10 @@ def _run_flood_analysis(event_key: str, sar_threshold: float) -> dict:
 
     # Layer 1d: JRC permanent water
     gsw             = ee.Image('JRC/GSW1_4/GlobalSurfaceWater').select('occurrence').clip(aoi)
-    permanent_water = gsw.gt(75).rename('permanent_water')
+    # 90% threshold: keeps genuine water bodies (rivers, lagoons, lakes)
+    # but releases seasonally flooded agricultural land (rice paddies, wetland margins)
+    # from the permanent water mask. 75% was too aggressive for Valencia/Albufera area.
+    permanent_water = gsw.gt(90).rename('permanent_water')
 
     # Layer 2: Combined classification
     sar_candidate   = sar_change.lt(sar_threshold)
@@ -897,7 +900,7 @@ The blue areas are your flood candidates before the slope and water masks are ap
         st.markdown(
             f"**Threshold:** {r['sar_threshold']:.1f} dB  \n"
             f"**Slope mask:** <5°  \n"
-            f"**Perm. water:** >75% occurrence"
+            f"**Perm. water:** >90% occurrence"
         )
 
     # ------------------------------------------------------------------
@@ -949,8 +952,10 @@ The before composite used {r['before_count']} scenes; the after composite used {
 Flood water ponds on flat terrain. Slopes above 5° drain too quickly for surface ponding to persist.
 This also removes SAR geometry artefacts: steep slopes produce layover and shadow that mimic water.
 
-**Permanent water mask — JRC Global Surface Water, >75% occurrence**
-Pixels flagged as water in >75% of Landsat observations (1984–2021) are classified as permanent water.
+**Permanent water mask — JRC Global Surface Water, >90% occurrence**
+Pixels flagged as water in >90% of Landsat observations (1984–2021) are classified as permanent water.
+This threshold retains genuine water bodies (rivers, lagoons, lakes) while excluding seasonally
+flooded land such as rice paddies that would otherwise be masked despite flooding during the event.
 The {r['area_permanent']:,.0f} km² baseline includes the main river channel and irrigation network.
 Without this mask, the existing water infrastructure would dominate the flood statistics.
 
