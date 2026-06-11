@@ -1718,13 +1718,16 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                         st.caption(f"📡 {result['channels']}")
 
         # ---- Compute index stats from the already-rendered contact results ----
-        # No API calls — reads numpy arrays already in memory. Always recompute so
-        # stale session state from a previous deploy never blocks the table.
+        # No API calls — reads numpy arrays already in memory.
+        _labels_in_valid = [r.get("label","") for r in valid]
+        st.caption(f"DEBUG labels: {_labels_in_valid}")
         try:
             _computed = spectral_explorer.compute_index_stats(valid, _c_sat)
             st.session_state.se_index_stats = _computed if _computed else {}
+            st.caption(f"DEBUG stats keys: {list(_computed.keys()) if _computed else 'empty'}")
         except Exception as _idx_err:
             st.session_state.se_index_stats = {}
+            st.caption(f"DEBUG stats error: {_idx_err}")
 
         # ---- Compute spectral signature (once per contact sheet run) ----
         if st.session_state.se_spectral_sig is None and st.session_state.se_best_item:
@@ -1813,34 +1816,30 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     use_container_width=True,
                 )
 
-            # Word download — store bytes in session state so download button persists
+            # Word download — generate at render time so download works immediately
             with _dl_col2:
-                if st.button("⬇️ Generate Word Doc", key="se_word_btn", use_container_width=True):
-                    with st.spinner("Building Word document..."):
-                        try:
-                            st.session_state.se_docx_bytes = spectral_explorer.build_spectral_docx(
-                                contact_results=valid,
-                                index_stats=_valid_idx,
-                                spectral_sig=_sig,
-                                location_name=_c_loc,
-                                scene_date=_c_date,
-                                scene_cloud=_c_cloud,
-                                satellite_key=_c_sat,
-                                ai_text=st.session_state.se_ai_result or "",
-                                ai_model=st.session_state.se_ai_model or "",
-                            )
-                        except Exception as _de:
-                            st.error(f"Word doc error: {_de}")
-
-            if st.session_state.get("se_docx_bytes"):
-                st.download_button(
-                    "⬇️ Download Word (.docx)",
-                    data=st.session_state.se_docx_bytes,
-                    file_name=f"spectral_explorer_{_c_loc.replace(' ', '_')}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    key="se_docx_dl_btn",
-                    use_container_width=True,
-                )
+                try:
+                    _docx_bytes = spectral_explorer.build_spectral_docx(
+                        contact_results=valid,
+                        index_stats=_valid_idx,
+                        spectral_sig=_sig,
+                        location_name=_c_loc,
+                        scene_date=_c_date,
+                        scene_cloud=_c_cloud,
+                        satellite_key=_c_sat,
+                        ai_text=st.session_state.se_ai_result or "",
+                        ai_model=st.session_state.se_ai_model or "",
+                    )
+                    st.download_button(
+                        "⬇️ Download Word (.docx)",
+                        data=_docx_bytes,
+                        file_name=f"spectral_explorer_{_c_loc.replace(' ', '_')}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key="se_docx_dl_btn",
+                        use_container_width=True,
+                    )
+                except Exception as _de:
+                    st.error(f"Word doc error: {_de}")
 
     # Stop here — do not render the EO Explorer below
     st.stop()
