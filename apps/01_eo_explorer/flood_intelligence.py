@@ -70,7 +70,7 @@ FLOOD_EVENTS = {
             "Cloud cover during monsoon season makes SAR the primary detection sensor."
         ),
         "sar_threshold": -3.0,
-        "orbit": "ASCENDING",
+        "orbit": "DESCENDING",
     },
     "Nigeria 2022 — Niger-Benue Confluence, Lokoja": {
         "bbox":         [6.2, 7.5, 7.8, 9.0],
