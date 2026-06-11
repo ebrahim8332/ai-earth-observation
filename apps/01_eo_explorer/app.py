@@ -1187,6 +1187,11 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         ("se_contact_results",   None),
         ("se_contact_info",      None),
         ("se_selected_item_id",  None),
+        ("se_bbox",              None),
+        ("se_index_stats",       None),
+        ("se_spectral_sig",      None),
+        ("se_ai_result",         None),
+        ("se_ai_model",          None),
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
@@ -1267,6 +1272,10 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         st.session_state.se_rendered_arr     = None
         st.session_state.se_contact_results  = None
         st.session_state.se_selected_item_id = None
+        st.session_state.se_index_stats      = None
+        st.session_state.se_spectral_sig     = None
+        st.session_state.se_ai_result        = None
+        st.session_state.se_ai_model         = None
 
     # -----------------------------------------------------------------------
     # Row 2: Date range + Cloud cover + Search button
@@ -1330,6 +1339,10 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                 st.session_state.se_coverage  = scores
                 st.session_state.se_rendered_arr    = None
                 st.session_state.se_contact_results = None
+                st.session_state.se_index_stats     = None
+                st.session_state.se_spectral_sig    = None
+                st.session_state.se_ai_result       = None
+                st.session_state.se_ai_model        = None
                 # Stamp the location so future renders know what was searched
                 st.session_state.se_last_searched_location = location_label
                 st.success(
@@ -1429,6 +1442,10 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         # Clear stored results — they belong to the old satellite
         st.session_state.se_rendered_arr    = None
         st.session_state.se_contact_results = None
+        st.session_state.se_index_stats     = None
+        st.session_state.se_spectral_sig    = None
+        st.session_state.se_ai_result       = None
+        st.session_state.se_ai_model        = None
 
     # Initialise R/G/B to true color on very first load
     if "se_r" not in st.session_state:
@@ -1655,6 +1672,13 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                 "sat_key":       sat_key,
                 "location_label":location_label,
             }
+            # Store bbox so index stats + spectral sig fetches use the same crop
+            st.session_state.se_bbox       = bbox_se
+            # Reset computed stats — new contact sheet means new scene
+            st.session_state.se_index_stats = None
+            st.session_state.se_spectral_sig = None
+            st.session_state.se_ai_result   = None
+            st.session_state.se_ai_model    = None
 
     # -----------------------------------------------------------------------
     # DISPLAY COMPARE ALL VIEWS — always shown if results exist in session state
@@ -1662,14 +1686,24 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
     if st.session_state.se_contact_results:
         c_info  = st.session_state.se_contact_info
         valid   = st.session_state.se_contact_results
+        _c_sat  = c_info["sat_key"]
+        _c_loc  = c_info["location_label"]
+        _c_date = c_info["scene_date"]
+
+        # ---- resolve cloud cover for captions ----
+        _c_cloud = 0.0
+        if st.session_state.se_best_item:
+            _ci = st.session_state.se_best_item
+            _cf = satellite_catalog.SATELLITES.get(_c_sat, {}).get("cloud_field", "eo:cloud_cover")
+            _c_cloud = float(_ci.properties.get(_cf, 0))
 
         st.divider()
         st.markdown(
-            f"**All spectral views — {c_info['location_label']} — "
-            f"{c_info['scene_date']} — {c_info['sat_key']}**"
+            f"**All spectral views — {_c_loc} — {_c_date} — {_c_sat}**"
         )
         st.caption("Every named band combination + NDVI + NDWI + NDMI + NBR + SAVI + EVI + BSI rendered for comparison.")
 
+        # ---- Contact sheet grid ----
         cols_per_row = 3
         for i in range(0, len(valid), cols_per_row):
             row_items = valid[i:i + cols_per_row]
@@ -1680,6 +1714,121 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     st.caption(result["note"])
                     if result.get("channels"):
                         st.caption(f"📡 {result['channels']}")
+
+        # ---- Compute index stats (once per contact sheet run) ----
+        if st.session_state.se_index_stats is None and st.session_state.se_best_item:
+            with st.spinner("Computing spectral index statistics..."):
+                _bbox_for_stats = st.session_state.get("se_bbox")
+                st.session_state.se_index_stats = spectral_explorer.compute_index_stats(
+                    st.session_state.se_best_item, _c_sat, bbox=_bbox_for_stats
+                )
+
+        # ---- Compute spectral signature (once per contact sheet run) ----
+        if st.session_state.se_spectral_sig is None and st.session_state.se_best_item:
+            with st.spinner("Computing spectral signature..."):
+                _bbox_for_sig = st.session_state.get("se_bbox")
+                st.session_state.se_spectral_sig = spectral_explorer.compute_spectral_signature(
+                    st.session_state.se_best_item, _c_sat, bbox=_bbox_for_sig
+                )
+
+        # ---- Index statistics table ----
+        _idx_stats = st.session_state.se_index_stats or {}
+        _valid_idx = {k: v for k, v in _idx_stats.items() if v}
+        if _valid_idx:
+            st.markdown("#### Spectral Index Statistics")
+            st.caption("Values represent the 5th–95th percentile range of valid pixels. Derived from rendered pixel values.")
+            import pandas as pd
+            _idx_rows = []
+            for _iname, _is in _valid_idx.items():
+                _idx_rows.append({
+                    "Index": _iname,
+                    "Min":   f"{_is['min']:+.3f}",
+                    "Mean":  f"{_is['mean']:+.3f}",
+                    "Max":   f"{_is['max']:+.3f}",
+                })
+            st.dataframe(pd.DataFrame(_idx_rows), use_container_width=True, hide_index=True)
+
+        # ---- Spectral signature chart ----
+        _sig = st.session_state.se_spectral_sig or {}
+        if _sig and not satellite_catalog.SATELLITES.get(_c_sat, {}).get("sar"):
+            st.markdown("#### Spectral Signature")
+            st.caption("Mean reflectance per band — shows how different surface types absorb or reflect each wavelength.")
+            _sig_fig = spectral_explorer.build_spectral_signature_chart(_sig, _c_sat)
+            st.plotly_chart(_sig_fig, use_container_width=True)
+
+        # ---- AI Interpretation ----
+        if st.button("🤖 AI: Interpret full contact sheet", key="se_ai_contact"):
+            with st.spinner("Generating integrated scene analysis..."):
+                _ai_txt, _ai_mdl = spectral_explorer.get_scene_interpretation(
+                    valid, _valid_idx, _c_sat, _c_loc, _c_date, _c_cloud
+                )
+                st.session_state.se_ai_result = _ai_txt
+                st.session_state.se_ai_model  = _ai_mdl
+
+        if st.session_state.se_ai_result:
+            with st.expander("📋 AI Interpretation", expanded=True):
+                st.caption(f"Model: {st.session_state.se_ai_model}")
+                st.markdown(st.session_state.se_ai_result)
+
+        # ---- Downloads ----
+        st.markdown("#### Downloads")
+        _dl_col1, _dl_col2 = st.columns(2)
+
+        # Markdown download
+        _md_lines = [
+            f"# Spectral Explorer Report",
+            f"",
+            f"**Location:** {_c_loc}",
+            f"**Scene date:** {_c_date}",
+            f"**Satellite:** {_c_sat}",
+            f"**Cloud cover:** {_c_cloud:.1f}%",
+            f"",
+            f"## Band Combinations Rendered",
+            f"",
+        ]
+        for _r in valid:
+            _md_lines.append(f"- **{_r['label']}** — {_r['note']}")
+        if _valid_idx:
+            _md_lines += ["", "## Spectral Index Statistics", ""]
+            _md_lines.append("| Index | Min | Mean | Max |")
+            _md_lines.append("|-------|-----|------|-----|")
+            for _iname, _is in _valid_idx.items():
+                _md_lines.append(f"| {_iname} | {_is['min']:+.3f} | {_is['mean']:+.3f} | {_is['max']:+.3f} |")
+        if st.session_state.se_ai_result:
+            _md_lines += ["", "## AI Interpretation", "", st.session_state.se_ai_result]
+        _md_str = "\n".join(_md_lines)
+
+        with _dl_col1:
+            st.download_button(
+                "⬇️ Download Markdown",
+                data=_md_str,
+                file_name=f"spectral_explorer_{_c_loc.replace(' ', '_')}.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
+
+        # Word download
+        with _dl_col2:
+            if st.button("⬇️ Generate Word Doc", key="se_word_btn", use_container_width=True):
+                with st.spinner("Building Word document..."):
+                    _docx_bytes = spectral_explorer.build_spectral_docx(
+                        contact_results=valid,
+                        index_stats=_valid_idx,
+                        spectral_sig=_sig,
+                        location_name=_c_loc,
+                        scene_date=_c_date,
+                        scene_cloud=_c_cloud,
+                        satellite_key=_c_sat,
+                        ai_text=st.session_state.se_ai_result or "",
+                        ai_model=st.session_state.se_ai_model or "",
+                    )
+                    st.download_button(
+                        "⬇️ Download Word (.docx)",
+                        data=_docx_bytes,
+                        file_name=f"spectral_explorer_{_c_loc.replace(' ', '_')}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                    )
 
     # Stop here — do not render the EO Explorer below
     st.stop()

@@ -28,6 +28,7 @@ from datetime import datetime
 import config
 import satellite_catalog
 import ai_assistant
+import ai_chain
 
 # Planetary Computer STAC API endpoint
 PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
@@ -687,6 +688,419 @@ def render_contact_sheet(item, satellite_key: str,
         })
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Index statistics (approximate — derived from greyscale render pixel values)
+# ---------------------------------------------------------------------------
+
+# Rescale ranges used when rendering each index — maps pixel 0-255 back to real value
+_INDEX_RESCALE = {
+    "NDVI": (-1.0,  1.0),
+    "NDWI": (-1.0,  1.0),
+    "NDMI": (-0.5,  0.5),
+    "NBR":  (-1.0,  1.0),
+    "SAVI": ( 0.0,  0.8),
+    "EVI":  (-0.2,  1.0),
+    "BSI":  (-0.5,  0.5),
+}
+
+_INDEX_EXPRESSIONS = {
+    "Sentinel-2 L2A": {
+        "NDVI": "(B08-B04)/(B08+B04)",
+        "NDWI": "(B03-B08)/(B03+B08)",
+        "NDMI": "(B08-B11)/(B08+B11)",
+        "NBR":  "(B08-B12)/(B08+B12)",
+        "SAVI": "1.5*(B08-B04)/(B08+B04+0.5)",
+        "EVI":  "2.5*(B08-B04)/(B08+6*B04-7.5*B02+1)",
+        "BSI":  "((B11+B04)-(B08+B02))/((B11+B04)+(B08+B02))",
+    },
+    "Landsat 8/9": {
+        "NDVI": "(nir08-red)/(nir08+red)",
+        "NDWI": "(green-nir08)/(green+nir08)",
+        "NDMI": "(nir08-swir16)/(nir08+swir16)",
+        "NBR":  "(nir08-swir22)/(nir08+swir22)",
+        "SAVI": "1.5*(nir08-red)/(nir08+red+0.5)",
+        "EVI":  "2.5*(nir08-red)/(nir08+6*red-7.5*blue+1)",
+        "BSI":  "((swir16+red)-(nir08+blue))/((swir16+red)+(nir08+blue))",
+    },
+}
+
+_BAND_EXPRESSIONS = {
+    "Sentinel-2 L2A": ["B02", "B03", "B04", "B08", "B11", "B12"],
+    "Landsat 8/9":    ["blue", "green", "red", "nir08", "swir16", "swir22"],
+}
+
+_BAND_WAVELENGTHS = {
+    "Sentinel-2 L2A": {
+        "B02": 490, "B03": 560, "B04": 665,
+        "B08": 842, "B11": 1610, "B12": 2190,
+    },
+    "Landsat 8/9": {
+        "blue": 485, "green": 560, "red": 660,
+        "nir08": 865, "swir16": 1610, "swir22": 2200,
+    },
+}
+
+
+def compute_index_stats(item, satellite_key: str, bbox: list = None) -> dict:
+    """Fetch each spectral index as a greyscale image and compute min/mean/max.
+
+    Pixel values (0-255) are mapped back to real index values using the known
+    rescale range for each index. Returns a dict keyed by index name.
+    Each value is {'min': float, 'mean': float, 'max': float} or None on failure.
+    """
+    sat = satellite_catalog.SATELLITES[satellite_key]
+    if sat.get("sar"):
+        return {}
+
+    expressions = _INDEX_EXPRESSIONS.get(satellite_key, {})
+    results = {}
+
+    for idx_name, expr in expressions.items():
+        lo, hi = _INDEX_RESCALE[idx_name]
+        params = [
+            ("collection",    sat["collection"]),
+            ("item",          item.id),
+            ("expression",    expr),
+            ("colormap_name", "greys"),
+            ("rescale",       f"{lo},{hi}"),
+            ("width",         "200"),
+            ("height",        "200"),
+        ]
+        if bbox:
+            params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
+        try:
+            resp = requests.get(PC_RENDER_URL, params=params, timeout=30)
+            if resp.status_code != 200:
+                results[idx_name] = None
+                continue
+            arr = np.array(Image.open(BytesIO(resp.content)).convert("L"), dtype=np.float32)
+            # Remove nodata (pure black or pure white borders)
+            valid = (arr > 5) & (arr < 250)
+            if not valid.any():
+                results[idx_name] = None
+                continue
+            vals = arr[valid] / 255.0 * (hi - lo) + lo
+            results[idx_name] = {
+                "min":  float(np.percentile(vals, 5)),
+                "mean": float(np.mean(vals)),
+                "max":  float(np.percentile(vals, 95)),
+            }
+        except Exception:
+            results[idx_name] = None
+
+    return results
+
+
+def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> dict:
+    """Fetch each optical band as greyscale and return mean reflectance per band.
+
+    Returns a dict: band_name -> {'wavelength': int, 'mean_reflectance': float}
+    Reflectance is approximate (derived from rendered pixel values).
+    """
+    sat = satellite_catalog.SATELLITES[satellite_key]
+    if sat.get("sar"):
+        return {}
+
+    band_list = _BAND_EXPRESSIONS.get(satellite_key, [])
+    wavelengths = _BAND_WAVELENGTHS.get(satellite_key, {})
+    rescale = sat["rescale"]  # e.g. "0,3000" or "7000,22000"
+    lo_r, hi_r = [float(x) for x in rescale.split(",")]
+    results = {}
+
+    for band in band_list:
+        params = [
+            ("collection",    sat["collection"]),
+            ("item",          item.id),
+            ("assets",        band),
+            ("asset_bidx",    f"{band}|1"),
+            ("rescale",       rescale),
+            ("colormap_name", "greys"),
+            ("width",         "150"),
+            ("height",        "150"),
+        ]
+        if bbox:
+            params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
+        try:
+            resp = requests.get(PC_RENDER_URL, params=params, timeout=30)
+            if resp.status_code != 200:
+                continue
+            arr = np.array(Image.open(BytesIO(resp.content)).convert("L"), dtype=np.float32)
+            valid = (arr > 5) & (arr < 250)
+            if not valid.any():
+                continue
+            mean_px = float(np.mean(arr[valid]))
+            # Map pixel (0-255) back to DN, then normalise to 0-1 reflectance factor
+            mean_dn = mean_px / 255.0 * (hi_r - lo_r) + lo_r
+            reflectance = mean_dn / 10000.0  # Sentinel-2 scale factor
+            results[band] = {
+                "wavelength":       wavelengths.get(band, 0),
+                "mean_reflectance": round(reflectance, 4),
+            }
+        except Exception:
+            continue
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Spectral signature chart
+# ---------------------------------------------------------------------------
+
+def build_spectral_signature_chart(sig: dict, satellite_key: str) -> go.Figure:
+    """Build a bar chart of mean reflectance per band — the spectral signature."""
+    sat = satellite_catalog.SATELLITES[satellite_key]
+    bands_meta = sat["bands"]
+
+    items = sorted(sig.items(), key=lambda x: x[1]["wavelength"])
+    labels = []
+    values = []
+    colors = []
+
+    wavelength_colors = {
+        range(400, 500):  "#4169e1",   # blue
+        range(500, 600):  "#3cb371",   # green
+        range(600, 700):  "#e74c3c",   # red
+        range(700, 1000): "#8b0000",   # NIR — dark red
+        range(1000, 2000):"#d2691e",   # SWIR1 — brown
+        range(2000, 3000):"#8b4513",   # SWIR2 — darker brown
+    }
+
+    def get_color(wl):
+        for rng, col in wavelength_colors.items():
+            if wl in rng:
+                return col
+        return "#888888"
+
+    for band, data in items:
+        name = bands_meta.get(band, {}).get("name", band)
+        labels.append(f"{band}\n{name}\n{data['wavelength']} nm")
+        values.append(data["mean_reflectance"])
+        colors.append(get_color(data["wavelength"]))
+
+    fig = go.Figure(go.Bar(
+        x=labels,
+        y=values,
+        marker_color=colors,
+        text=[f"{v:.3f}" for v in values],
+        textposition="outside",
+    ))
+    fig.update_layout(
+        title="Spectral signature — mean reflectance per band",
+        yaxis_title="Mean reflectance (0–1)",
+        height=340,
+        margin=dict(l=10, r=20, t=45, b=20),
+        plot_bgcolor="#f8f8f8",
+        paper_bgcolor="#ffffff",
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# AI interpretation — integrated scene analysis
+# ---------------------------------------------------------------------------
+
+def get_scene_interpretation(contact_results: list, index_stats: dict,
+                              satellite_key: str, location_name: str,
+                              scene_date: str, scene_cloud: float) -> tuple:
+    """Generate an integrated AI interpretation of the full contact sheet results.
+
+    Takes all rendered combinations + index stats as input.
+    Returns (text, model_name).
+    """
+    # Summarise what each combination showed
+    combo_summary = []
+    for r in contact_results:
+        combo_summary.append(f"- {r['label']}: {r['note']}")
+
+    # Summarise index stats
+    idx_summary = []
+    for idx, stats in index_stats.items():
+        if stats:
+            idx_summary.append(
+                f"- {idx}: min {stats['min']:+.3f}, mean {stats['mean']:+.3f}, max {stats['max']:+.3f}"
+            )
+
+    prompt = f"""You are an Earth Observation analyst interpreting a multi-spectral satellite scene.
+
+Satellite: {satellite_key}
+Location: {location_name}
+Scene date: {scene_date}
+Cloud cover: {scene_cloud:.1f}%
+
+Band combinations rendered:
+{chr(10).join(combo_summary)}
+
+Spectral index statistics (5th-95th percentile range):
+{chr(10).join(idx_summary) if idx_summary else "No index stats available."}
+
+Write a detailed integrated analysis covering all four sections below. \
+Each section should be a full paragraph of 4-6 sentences. \
+Do not compress — the reader needs depth, not brevity.
+
+**Section 1 — Landscape Character:** Describe what this scene reveals about the landscape \
+based on all the band combinations together. What land cover types are present? \
+What is the dominant character of the area? What stands out across multiple views?
+
+**Section 2 — Spectral Signals:** Interpret the index statistics. What do the NDVI, NDWI, \
+and other index values tell us about vegetation health, water presence, soil exposure, \
+and surface moisture? Reference specific values where they are informative.
+
+**Section 3 — Sensor Insight:** What does this satellite ({satellite_key}) reveal about \
+this location that would not be visible in a standard photograph? Which band combinations \
+were most diagnostic for this specific landscape, and why?
+
+**Section 4 — Decision Application:** Name one specific stakeholder and describe exactly \
+how they would use this multi-spectral analysis to make a real operational decision. \
+Be specific about the decision, the data they would act on, and what the gap would be \
+without satellite imagery.
+
+Write in plain language. Use the bold section headings. Be direct and thorough."""
+
+    text, model = ai_chain.complete(
+        prompt,
+        groq_key=config.GROQ_API_KEY,
+        gemini_key=config.GEMINI_API_KEY,
+    )
+    return text, model
+
+
+def _fallback_scene_interpretation(location_name: str, satellite_key: str) -> str:
+    return f"""**Multi-spectral scene analysis — {location_name}**
+
+This scene was analysed across multiple band combinations using {satellite_key} imagery. Each combination reveals a different physical property of the surface — from chlorophyll absorption in the red band to soil moisture in the shortwave infrared.
+
+To enable AI interpretation, add a GROQ_API_KEY or GEMINI_API_KEY to your .env file."""
+
+
+# ---------------------------------------------------------------------------
+# Word document builder
+# ---------------------------------------------------------------------------
+
+def build_spectral_docx(contact_results, index_stats, spectral_sig,
+                         location_name, scene_date, scene_cloud,
+                         satellite_key, ai_text, ai_model):
+    """Build a Word document for the Spectral Explorer contact sheet.
+
+    Sections:
+      1. Title and scene metadata
+      2. Contact sheet thumbnails — 3-column grid
+      3. Spectral index statistics table
+      4. Band reference table
+      5. AI Interpretation
+    """
+    import io as _io
+    from docx import Document as _Document
+    from docx.shared import Inches as _Inches, Pt as _Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH as _ALIGN
+    from docx.oxml import OxmlElement as _OxmlElement
+    from docx.oxml.ns import qn as _qn
+    from PIL import Image as _PIL
+
+    doc = _Document()
+
+    # ---- Title ----
+    title = doc.add_heading("Spectral Explorer Report", 0)
+    title.alignment = _ALIGN.CENTER
+    sub = doc.add_paragraph()
+    sub.alignment = _ALIGN.CENTER
+    sub.add_run(f"{location_name}   |   {scene_date}   |   {satellite_key}   |   Cloud {scene_cloud:.1f}%").bold = True
+    doc.add_paragraph()
+
+    # ---- Contact sheet thumbnails — 3 per row ----
+    doc.add_heading("Band Combinations and Indices", level=1)
+    cols_per_row = 3
+    for row_start in range(0, len(contact_results), cols_per_row):
+        row_items = contact_results[row_start:row_start + cols_per_row]
+        # Two Word table rows per group: images + captions
+        tbl = doc.add_table(rows=2, cols=cols_per_row)
+        # Remove borders
+        for row in tbl.rows:
+            for cell in row.cells:
+                tc = cell._tc
+                tcPr = tc.get_or_add_tcPr()
+                tcBorders = _OxmlElement("w:tcBorders")
+                for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                    border = _OxmlElement(f"w:{side}")
+                    border.set(_qn("w:val"), "none")
+                    tcBorders.append(border)
+                tcPr.append(tcBorders)
+        for col_idx, result in enumerate(row_items):
+            img_cell = tbl.rows[0].cells[col_idx]
+            cap_cell = tbl.rows[1].cells[col_idx]
+            arr = result.get("array")
+            if arr is not None:
+                buf = _io.BytesIO()
+                _PIL.fromarray(arr).save(buf, format="PNG")
+                buf.seek(0)
+                run = img_cell.paragraphs[0].add_run()
+                run.add_picture(buf, width=_Inches(1.9))
+            cap_p = cap_cell.paragraphs[0]
+            cap_p.add_run(result["label"]).bold = True
+            cap_cell.add_paragraph(result["note"]).style
+        doc.add_paragraph()
+
+    # ---- Index statistics table ----
+    if index_stats:
+        doc.add_heading("Spectral Index Statistics", level=1)
+        doc.add_paragraph(
+            "Values represent the 5th–95th percentile range of valid pixels in the scene."
+        )
+        idx_tbl = doc.add_table(rows=1, cols=4)
+        idx_tbl.style = "Table Grid"
+        for cell, txt in zip(idx_tbl.rows[0].cells, ["Index", "Min", "Mean", "Max"]):
+            cell.text = txt
+            cell.paragraphs[0].runs[0].bold = True
+        for idx_name, stats in index_stats.items():
+            if stats:
+                row = idx_tbl.add_row().cells
+                row[0].text = idx_name
+                row[1].text = f"{stats['min']:+.3f}"
+                row[2].text = f"{stats['mean']:+.3f}"
+                row[3].text = f"{stats['max']:+.3f}"
+        doc.add_paragraph()
+
+    # ---- Band reference table ----
+    doc.add_heading("Band Reference", level=1)
+    sat_meta = satellite_catalog.SATELLITES.get(satellite_key, {})
+    bands_meta = sat_meta.get("bands", {})
+    if bands_meta:
+        band_tbl = doc.add_table(rows=1, cols=4)
+        band_tbl.style = "Table Grid"
+        for cell, txt in zip(band_tbl.rows[0].cells, ["Band", "Name", "Wavelength", "What it measures"]):
+            cell.text = txt
+            cell.paragraphs[0].runs[0].bold = True
+        for band_id, meta in bands_meta.items():
+            row = band_tbl.add_row().cells
+            row[0].text = band_id
+            row[1].text = meta.get("name", "")
+            row[2].text = meta.get("wavelength", "")
+            row[3].text = meta.get("description", "")
+        doc.add_paragraph()
+
+    # ---- AI Interpretation ----
+    if ai_text:
+        doc.add_heading("AI Interpretation", level=1)
+        if ai_model:
+            doc.add_paragraph(f"Model: {ai_model}").italic = True
+        import re as _re
+        for line in ai_text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            p = doc.add_paragraph()
+            parts = _re.split(r"(\*\*.*?\*\*)", line)
+            for part in parts:
+                if part.startswith("**") and part.endswith("**"):
+                    p.add_run(part[2:-2]).bold = True
+                elif part:
+                    p.add_run(part)
+
+    buf = _io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
 
 
 # ---------------------------------------------------------------------------
