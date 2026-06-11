@@ -1782,7 +1782,8 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
             st.dataframe(pd.DataFrame(_idx_rows), use_container_width=True, hide_index=True)
 
         # ---- AI Interpretation ----
-        if st.button("🤖 AI: Interpret full contact sheet", key="se_ai_contact"):
+        st.divider()
+        if st.button("🤖 AI: Interpret Full Contact Sheet", key="se_ai_contact", type="primary", use_container_width=True):
             with st.spinner("Generating integrated scene analysis..."):
                 _ai_txt, _ai_mdl = spectral_explorer.get_scene_interpretation(
                     valid, _valid_idx, _c_sat, _c_loc, _c_date, _c_cloud
