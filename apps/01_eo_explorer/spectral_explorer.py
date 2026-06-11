@@ -997,7 +997,7 @@ def get_scene_interpretation(contact_results: list, index_stats: dict,
     for idx, stats in index_stats.items():
         if stats:
             idx_summary.append(
-                f"- {idx}: min {stats['min']:+.3f}, mean {stats['mean']:+.3f}, max {stats['max']:+.3f}"
+                f"- {idx}: {stats['value']:+.3f} ({stats.get('interpretation', '')})"
             )
 
     prompt = f"""You are an Earth Observation analyst interpreting a multi-spectral satellite scene.
