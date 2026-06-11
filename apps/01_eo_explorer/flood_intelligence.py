@@ -87,7 +87,7 @@ FLOOD_EVENTS = {
             "West African rainy season limits optical sensor utility."
         ),
         "sar_threshold": -3.0,
-        "orbit": "DESCENDING",
+        "orbit": None,
     },
 }
 
@@ -104,36 +104,41 @@ def _run_flood_analysis(event_key: str, sar_threshold: float) -> dict:
     aoi   = ee.Geometry.Rectangle(bbox)
 
     # Layer 1a: Sentinel-1 SAR
-    def get_sar(start, end):
-        return (
+    # orbit filter is optional — set to None to use all available passes
+    orbit = event.get("orbit")
+
+    def _base_s1(start, end):
+        col = (
             ee.ImageCollection('COPERNICUS/S1_GRD')
             .filterBounds(aoi)
             .filterDate(start, end)
             .filter(ee.Filter.eq('instrumentMode', 'IW'))
             .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
-            .filter(ee.Filter.eq('orbitProperties_pass', event["orbit"]))
-            .select('VV')
-            .median()
-            .clip(aoi)
         )
+        if orbit:
+            col = col.filter(ee.Filter.eq('orbitProperties_pass', orbit))
+        return col
+
+    def count_sar(start, end):
+        return _base_s1(start, end).size().getInfo()
+
+    before_count = count_sar(event["before_start"], event["before_end"])
+    after_count  = count_sar(event["after_start"],  event["after_end"])
+
+    # Guard: fail early with a clear message if no scenes found
+    if before_count == 0 or after_count == 0:
+        raise ValueError(
+            f"No Sentinel-1 SAR scenes found for this event "
+            f"(before: {before_count} scenes, after: {after_count} scenes). "
+            f"Check Sentinel-1 coverage for this region and date range."
+        )
+
+    def get_sar(start, end):
+        return _base_s1(start, end).select('VV').median().clip(aoi)
 
     sar_before = get_sar(event["before_start"], event["before_end"])
     sar_after  = get_sar(event["after_start"],  event["after_end"])
     sar_change = sar_after.subtract(sar_before).rename('sar_change')
-
-    def count_sar(start, end):
-        return (
-            ee.ImageCollection('COPERNICUS/S1_GRD')
-            .filterBounds(aoi)
-            .filterDate(start, end)
-            .filter(ee.Filter.eq('instrumentMode', 'IW'))
-            .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
-            .filter(ee.Filter.eq('orbitProperties_pass', event["orbit"]))
-            .size().getInfo()
-        )
-
-    before_count = count_sar(event["before_start"], event["before_end"])
-    after_count  = count_sar(event["after_start"],  event["after_end"])
 
     # Layer 1b: Sentinel-2 NDWI
     def compute_ndwi(image):
