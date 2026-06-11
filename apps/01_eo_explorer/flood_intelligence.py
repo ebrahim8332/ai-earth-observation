@@ -63,7 +63,7 @@ FLOOD_EVENTS = {
         "before_start": "2024-09-01",
         "before_end":   "2024-10-27",
         "after_start":  "2024-10-28",
-        "after_end":    "2024-11-30",
+        "after_end":    "2024-11-12",
         "context": (
             "DANA cold drop weather event on 29 October 2024. Over 220 deaths, "
             "the worst flooding in Spain in living memory. The Horta Sud agricultural "
@@ -133,11 +133,17 @@ def _run_flood_analysis(event_key: str, sar_threshold: float) -> dict:
             f"Check Sentinel-1 coverage for this region and date range."
         )
 
-    def get_sar(start, end):
+    def get_sar_median(start, end):
         return _base_s1(start, end).select('VV').median().clip(aoi)
 
-    sar_before = get_sar(event["before_start"], event["before_end"])
-    sar_after  = get_sar(event["after_start"],  event["after_end"])
+    def get_sar_min(start, end):
+        # Use minimum composite for after period — captures lowest backscatter
+        # (peak flood state) across all passes, regardless of flood duration.
+        # Median dilutes short-duration floods where most scenes are post-recession.
+        return _base_s1(start, end).select('VV').min().clip(aoi)
+
+    sar_before = get_sar_median(event["before_start"], event["before_end"])
+    sar_after  = get_sar_min(event["after_start"],     event["after_end"])
     sar_change = sar_after.subtract(sar_before).rename('sar_change')
 
     # Layer 1b: Sentinel-2 NDWI
@@ -303,7 +309,7 @@ def _build_sar_row_fig(results: dict) -> bytes:
          f"VV median · {results['after_count']} scenes\nAreas now darker = surface smoothed by flood"),
         (results['url_change'],
          "SAR Backscatter Change",
-         "After minus Before (dB)\nBlue = increase · Red = decrease (flood signal)"),
+         "After minus Before (dB)\nBlue = decrease (flood signal) · Red = increase"),
     ]
 
     fig, axes = plt.subplots(1, 3, figsize=(14, 5))
@@ -852,9 +858,10 @@ In the After panel, areas that flooded have become darker because flood water is
 a smooth mirror that reflects radar away from the sensor.
 
 **SAR Backscatter Change** shows the difference — After minus Before.
-Red pixels had lower backscatter after the flood. That is the flood detection signal.
-Blue pixels had higher backscatter after — possibly from wind roughening dry soil or crop growth.
-The red areas are your flood candidates before the slope and water masks are applied.
+**Blue pixels had lower backscatter after the flood.** That is the flood detection signal.
+White pixels had no change. Red pixels had higher backscatter after — possibly wind
+roughening, crop growth, or soil moisture changes after flood recession.
+The blue areas are your flood candidates before the slope and water masks are applied.
         """)
 
     # ------------------------------------------------------------------
@@ -916,6 +923,17 @@ The red areas are your flood candidates before the slope and water masks are app
 
     conf_icon = {"HIGH": "🟢", "MEDIUM": "🟡", "LOW": "🔴"}.get(r["confidence"], "⚪")
     st.info(f"{conf_icon} **Confidence: {r['confidence']}** — {r['confidence_note']}")
+
+    if r["area_total_flood"] == 0:
+        st.warning(
+            "No flood pixels detected. Possible causes: "
+            "(1) the flood duration was too short for the SAR after composite to capture it — "
+            "try a shorter or earlier after window; "
+            "(2) the SAR threshold is too strict — try a less negative value (e.g. −2 dB); "
+            "(3) the flood area overlaps with the permanent water mask. "
+            "If the SAR change panel shows blue signal in the scene, the data is present — "
+            "adjust the threshold to capture it."
+        )
 
     chart_bytes = _build_extent_chart(results)
     st.image(chart_bytes, use_column_width=False, width=500)
