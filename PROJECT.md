@@ -8,8 +8,8 @@
 ## Current Status
 
 **Phase:** Arc-based program (revised after Day 12)
-**Last completed:** Arc 2 complete — notebook run clean end-to-end, portal module live.
-**Next session:** Arc 3 — Flood Detection and Impact Mapping.
+**Last completed:** Arc 3 — Flood Detection and Impact Mapping. Notebook + portal module live.
+**Next session:** Arc 4 — Burn Severity and Wildfire Analysis.
 
 ---
 
@@ -56,8 +56,9 @@ All modules deployed at https://eoil-explorer.streamlit.app
 | Change Detection | Day 9 | Live |
 | AI Imagery Interpreter | Day 10 | Live |
 | Emissions Explorer | Day 12 | Live |
-| Land Cover Intelligence | Arc 1 | Live |
-| Corridor Risk Intelligence | Arc 2 | Live |
+| Land Cover Intelligence | Arc 1 | Live — Word doc, AI expander, stats tables, color legend, agreement metric |
+| Corridor Risk Intelligence | Arc 2 | Live — Word doc, AI expander, risk tables |
+| Flood Intelligence | Arc 3 | Live — SAR before/after, NDWI, slope mask, JRC water mask, AI impact brief, Word + Markdown download |
 
 ---
 
@@ -161,7 +162,28 @@ infrastructure exposure, recommended response actions.
 - DEM slope masking: why flat areas flood, steep areas do not
 - Fusing two sensor types for better results than either alone
 
-**Status:** Planned
+**Status:** Complete and fully validated. Notebook (08_flood_detection.ipynb) and portal module (flood_intelligence.py) live. Deployed to https://eoil-explorer.streamlit.app
+
+**Four flood events pre-configured:**
+- Pakistan 2022 — Indus Floodplain, Sindh (algorithm at full capacity — flat bare plain, weeks underwater)
+- Mozambique 2019 — Cyclone Idai, Beira Coastal Plain (vegetation double-bounce limitation — educational contrast)
+- Sudan 2020 — Nile Floods, Khartoum State (clean semi-arid case — sparse vegetation, strong signal)
+- Nigeria 2022 — Niger-Benue Confluence, Lokoja (SAR orbit coverage challenge — orbit=None required)
+
+**Algorithm lesson labels:** each event has a one-line explanation of what it demonstrates, displayed before the user runs the analysis.
+
+**Educational content added:**
+- Algorithm lesson label per event (Option A)
+- Known limitations expander: urban flooding, vegetated floodplains, flash flood timing, depth, subsurface saturation (Option B)
+- Professional next steps expander: field validation, cross-reference, impact overlay, re-run cadence, limitations documentation (Option C)
+- Custom AOI explainer: why custom area is not offered and what that design decision teaches (Option D)
+
+**Key implementation notes:**
+- After composite uses .min() (not .median()) to capture peak flood state regardless of flood duration.
+- JRC permanent water threshold set to 90% (not 75%) to avoid masking seasonally irrigated land.
+- ORBIT direction is event-specific. Nigeria and Sudan use orbit=None to include all available passes.
+- Cloud cover summary fetches average CLOUDY_PIXEL_PERCENTAGE from S2 and injects into Layer 3 prompt.
+- SAR threshold user-adjustable via slider (-8 to -1 dB) for interactive sensitivity demonstration.
 
 ---
 
@@ -456,8 +478,9 @@ Includes CSV and GeoJSON export of all flagged zones.
 - [x] Arc 1: Land Cover Intelligence — notebook + portal module complete (v1.9)
 - [x] Backlog review: 25 features assessed, plan revised, arcs 2-11 defined
 - [x] Pre-Arc 2: Module enhancements — spectral indices, export layer, confidence notes
-- [x] Arc 2: Corridor and Vegetation Risk — notebook + portal module complete, live
-- [ ] Arc 3: Flood Detection and Impact Mapping
+- [x] Arc 2: Corridor and Vegetation Risk — notebook + portal module complete, live. Preset corridors, location map, tile toggle, GEE double-init fix, AI brief expander, .md + .docx download, notebook header updated with technical notes.
+- [x] Post-Arc 2 enhancements — all five analytical modules updated: collapsible AI expander, model name caption, Markdown download, Word download with stats tables and thumbnails. Change Detection and Land Cover AI prompts rewritten for full-depth output. Land Cover Word doc includes color legend and algorithm agreement.
+- [x] Arc 3: Flood Detection and Impact Mapping — notebook (08_flood_detection.ipynb) + portal module (flood_intelligence.py) complete. Four pre-configured events (Pakistan, Mozambique, Sudan, Nigeria), algorithm lesson labels, known limitations expander, professional next steps expander, custom AOI explainer, SAR threshold slider, five-element AI impact brief, Word + Markdown downloads. All four events validated.
 - [ ] Arc 4: Burn Severity and Wildfire Analysis
 - [ ] Arc 5: Urban Growth and Load Intelligence
 - [ ] Arc 6: LiDAR Clearance Intelligence

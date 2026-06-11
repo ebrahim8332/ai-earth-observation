@@ -10,7 +10,7 @@ Three-layer architecture:
             new flood-only km², confidence level
   Layer 3: Gemini/Groq structured impact brief — five-element flood intelligence output
 
-All algorithm logic is ported from notebook 10_flood_detection.ipynb.
+All algorithm logic is ported from notebook 08_flood_detection.ipynb.
 Results are cached in Streamlit session state so switching tabs does not re-run.
 """
 
@@ -55,6 +55,10 @@ FLOOD_EVENTS = {
         ),
         "sar_threshold": -3.0,
         "orbit": "DESCENDING",
+        "algorithm_lesson": (
+            "Algorithm at full capacity. Flat bare agricultural plain, weeks underwater. "
+            "Expect several hundred km² of new flood with HIGH confidence."
+        ),
     },
     "Mozambique 2019 — Cyclone Idai, Beira Coastal Plain": {
         "bbox":         [33.5, -20.5, 35.5, -18.5],
@@ -72,6 +76,12 @@ FLOOD_EVENTS = {
         ),
         "sar_threshold": -3.0,
         "orbit": "DESCENDING",
+        "algorithm_lesson": (
+            "Vegetation double-bounce limitation. The Buzi and Pungwe delta has dense savanna "
+            "and reed beds. Flood water under vegetation increases SAR backscatter instead of "
+            "decreasing it — the opposite of the expected signal. Detection is conservative. "
+            "Compare the total new flood here with Pakistan to see the terrain effect directly."
+        ),
     },
     "Sudan 2020 — Nile Floods, Khartoum State": {
         "bbox":         [32.2, 15.0, 34.5, 17.0],
@@ -89,6 +99,11 @@ FLOOD_EVENTS = {
         ),
         "sar_threshold": -3.0,
         "orbit": None,
+        "algorithm_lesson": (
+            "Clean semi-arid case. Flat Nile corridor with sparse desert vegetation. "
+            "Minimal permanent water management infrastructure. "
+            "Expect a balanced result with all three bars at comparable heights."
+        ),
     },
     "Nigeria 2022 — Niger-Benue Confluence, Lokoja": {
         "bbox":         [6.2, 7.5, 7.8, 9.0],
@@ -105,6 +120,11 @@ FLOOD_EVENTS = {
         ),
         "sar_threshold": -3.0,
         "orbit": None,
+        "algorithm_lesson": (
+            "SAR orbit coverage challenge. West Africa has limited Sentinel-1 DESCENDING passes. "
+            "This event uses orbit=None to include all available passes. "
+            "Fewer scenes than Pakistan but enough for a meaningful result."
+        ),
     },
 }
 
@@ -758,6 +778,11 @@ The AI impact brief translates those measurements into a decision-ready output f
     with col_a:
         st.info(f"**Context:** {event['context']}")
 
+    # Option A: algorithm lesson label — what this event teaches
+    lesson = event.get("algorithm_lesson")
+    if lesson:
+        st.caption(f"📌 **What this event demonstrates:** {lesson}")
+
     sar_threshold = st.slider(
         "SAR backscatter change threshold (dB)",
         min_value=-8.0, max_value=-1.0,
@@ -772,6 +797,26 @@ The AI impact brief translates those measurements into a decision-ready output f
         "Less negative = more permissive, larger area. "
         "Try −5 dB and −2 dB to see the sensitivity range."
     )
+
+    # Option D: why custom AOI is not offered
+    with st.expander("Why no custom area option?", expanded=False):
+        st.markdown("""
+Flood detection requires event knowledge before you can run the algorithm.
+
+To configure a custom analysis you would need to know: where the flood occurred,
+the approximate date range, which Sentinel-1 orbit passes cover that region,
+and what the terrain looks like — flat agricultural land, vegetated delta, urban area, or semi-arid plain.
+
+Without that knowledge the algorithm will run but the output will be uninterpretable.
+A 50 km² result on an unknown landscape tells you nothing — it might be correct,
+it might be the algorithm misreading urban corner reflectors, or it might be missing
+90% of the true extent because the terrain is vegetated.
+
+The four pre-configured events are here because each one has been validated.
+The date windows, orbit filters, and AOI boundaries were chosen based on known event records.
+That is the standard practice in operational EO — event intelligence drives data selection,
+not the other way around.
+        """)
 
     run_btn = st.button("▶ Run Flood Analysis", type="primary", key="fi_run")
 
@@ -957,6 +1002,70 @@ The blue areas are your flood candidates before the slope and water masks are ap
 
     chart_bytes = _build_extent_chart(results)
     st.image(chart_bytes, use_column_width=False, width=500)
+
+    # Option B: known limitations
+    with st.expander("⚠️ What this algorithm cannot detect", expanded=False):
+        st.markdown(f"""
+**Urban flooding.**
+Buildings act as corner reflectors — the radar pulse bounces between the wall and the ground
+and returns directly to the sensor. Backscatter is very high both before and after flooding.
+The algorithm looks for backscatter decrease and misses most urban inundation completely.
+Field teams are always required to verify flooding in built-up areas.
+
+**Vegetated floodplains.**
+When water floods under standing vegetation — trees, reeds, shrubs — the pulse bounces
+between the water surface and the plant stems back toward the sensor (double-bounce).
+Backscatter increases rather than decreases. The Mozambique Cyclone Idai event in this module
+is a direct example: 400,000 hectares flooded, {57} km² detected. The vegetated delta
+suppressed most of the true signal.
+
+**Flash floods shorter than the SAR revisit time.**
+Sentinel-1 revisits any given location every 6–12 days. A flash flood that lasts 12–24 hours
+may not be captured by any SAR pass during the inundation window. The algorithm would
+show no flood even though one occurred.
+
+**Flood depth.**
+SAR backscatter change detects surface extent — water present or not.
+It cannot measure how deep the water is. A pixel flooded 10 cm and a pixel flooded 3 metres
+produce the same signal. Depth requires ground sensors, water level gauges, or LiDAR.
+
+**Subsurface saturation.**
+Soil can be saturated well beyond the visible flood boundary. SAR detects the surface water
+mirror. Saturated but not inundated soil is not visible. This matters for agricultural
+damage assessment — crops can fail from root saturation before standing water is visible.
+        """)
+
+    # Option C: what a professional does next
+    with st.expander("📋 What happens after this analysis in a real response", expanded=False):
+        st.markdown("""
+**1. Validate the boundary at field-accessible points.**
+The SAR classification has a spatial accuracy of approximately 500 metres at analysis scale.
+A field team checks two to three points along the detected flood edge to confirm whether
+the boundary is accurate, overestimated, or underestimated.
+
+**2. Cross-reference against social media and phone reports.**
+UNOSAT and Copernicus Emergency Management systematically compare satellite extent maps
+against geotagged social media reports, UN OCHA situation reports, and national disaster
+authority figures. Discrepancies identify where the algorithm missed or overcounted.
+
+**3. Separate extent from impact.**
+Knowing 200 km² is flooded is not the same as knowing what is inside that 200 km².
+The next step is overlaying the flood boundary against infrastructure layers: road networks,
+settlements, power lines, health facilities, agricultural parcels. That intersection is
+where the decision support value is generated.
+
+**4. Re-run after 7–10 days.**
+Flood extent changes rapidly. The next SAR pass (Sentinel-1 revisits every 6–12 days)
+shows whether the water is advancing, stable, or receding. A receding flood reveals
+which areas were temporarily inundated versus persistently flooded — that distinction
+drives crop damage and infrastructure priority assessments.
+
+**5. Document what the satellite cannot confirm.**
+A professional EO product always includes an explicit limitations section.
+What depth? Unknown. What damage inside the boundary? Unconfirmed. What flooded
+but was not detected due to vegetation? Unquantified. The AI brief in this module
+follows the same standard — Section 5 is always limitations.
+        """)
 
     with st.expander("ℹ️ What did each algorithm step do?", expanded=False):
         st.markdown(f"""
