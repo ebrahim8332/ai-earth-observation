@@ -1184,10 +1184,11 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         ("se_prev_preset",     None),
         ("se_rendered_arr",    None),
         ("se_rendered_info",   None),
-        ("se_contact_results",   None),
-        ("se_contact_info",      None),
-        ("se_selected_item_id",  None),
-        ("se_bbox",              None),
+        ("se_contact_results",     None),
+        ("se_contact_results_all", None),
+        ("se_contact_info",        None),
+        ("se_selected_item_id",    None),
+        ("se_bbox",                None),
         ("se_index_stats",       None),
         ("se_spectral_sig",      None),
         ("se_ai_result",         None),
@@ -1667,7 +1668,9 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                 results = spectral_explorer.render_contact_sheet(item, sat_key, bbox=bbox_se)
 
             valid = [r for r in results if r["array"] is not None and r["array"].max() > 0]
-            st.session_state.se_contact_results = valid
+            st.session_state.se_contact_results     = valid
+            # Keep all results (including None-array entries) for index stats
+            st.session_state.se_contact_results_all = results
             st.session_state.se_contact_info    = {
                 "scene_date":    item.datetime.strftime("%B %d, %Y"),
                 "sat_key":       sat_key,
@@ -1717,17 +1720,14 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     if result.get("channels"):
                         st.caption(f"📡 {result['channels']}")
 
-        # ---- Compute index stats from the already-rendered contact results ----
-        # No API calls — reads numpy arrays already in memory.
-        _labels_in_valid = [r.get("label","") for r in valid]
-        st.caption(f"DEBUG labels: {_labels_in_valid}")
+        # ---- Compute index stats — use full results list so index items not
+        # filtered out by the valid (max>0) check still contribute their labels.
+        _all_results = st.session_state.get("se_contact_results_all") or valid
         try:
-            _computed = spectral_explorer.compute_index_stats(valid, _c_sat)
+            _computed = spectral_explorer.compute_index_stats(_all_results, _c_sat)
             st.session_state.se_index_stats = _computed if _computed else {}
-            st.caption(f"DEBUG stats keys: {list(_computed.keys()) if _computed else 'empty'}")
-        except Exception as _idx_err:
+        except Exception:
             st.session_state.se_index_stats = {}
-            st.caption(f"DEBUG stats error: {_idx_err}")
 
         # ---- Compute spectral signature (once per contact sheet run) ----
         if st.session_state.se_spectral_sig is None and st.session_state.se_best_item:
