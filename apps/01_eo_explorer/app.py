@@ -1718,13 +1718,14 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                         st.caption(f"📡 {result['channels']}")
 
         # ---- Compute index stats from the already-rendered contact results ----
+        # This runs immediately — no API calls, just reads the rendered arrays
         if st.session_state.se_index_stats is None:
             try:
-                st.session_state.se_index_stats = spectral_explorer.compute_index_stats(
-                    valid, _c_sat
-                )
-            except Exception:
+                _computed = spectral_explorer.compute_index_stats(valid, _c_sat)
+                st.session_state.se_index_stats = _computed if _computed else {}
+            except Exception as _idx_err:
                 st.session_state.se_index_stats = {}
+                st.caption(f"Index stats error: {_idx_err}")
 
         # ---- Compute spectral signature (once per contact sheet run) ----
         if st.session_state.se_spectral_sig is None and st.session_state.se_best_item:
@@ -1740,6 +1741,8 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         # ---- Index statistics table ----
         _idx_stats = st.session_state.se_index_stats or {}
         _valid_idx = {k: v for k, v in _idx_stats.items() if v}
+        if not _valid_idx and _idx_stats is not None:
+            st.caption(f"Index stats: {len(_idx_stats)} computed, {len(_valid_idx)} valid — raw: {list(_idx_stats.keys())}")
         if _valid_idx:
             st.markdown("#### Spectral Index Statistics")
             st.caption("Values represent the 5th–95th percentile range of valid pixels. Derived from rendered pixel values.")
@@ -1832,12 +1835,16 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     except Exception as _de:
                         st.error(f"Word doc error: {_de}")
 
-        if st.session_state.get("se_docx_bytes"):
+        _docx_ready = st.session_state.get("se_docx_bytes")
+        if _docx_ready:
+            _docx_kb = len(_docx_ready) // 1024
+            st.caption(f"Word doc ready — {_docx_kb} KB")
             st.download_button(
                 "⬇️ Download Word (.docx)",
-                data=st.session_state.se_docx_bytes,
+                data=_docx_ready,
                 file_name=f"spectral_explorer_{_c_loc.replace(' ', '_')}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="se_docx_dl_btn",
                 use_container_width=True,
             )
 
