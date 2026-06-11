@@ -4133,6 +4133,34 @@ with col7:
 
 st.divider()
 
+col9, col10 = st.columns(2)
+
+with col9:
+    st.markdown("#### ⚠️ Corridor Risk Intelligence")
+    st.markdown(
+        "Multi-algorithm vegetation encroachment analysis for utility transmission corridors. "
+        "Four algorithms run on six months of Sentinel-2 NDVI data: K-means clustering, "
+        "threshold classification, linear regression per pixel, and Isolation Forest anomaly detection. "
+        "Output: a prioritised risk table — Critical, Warning, Monitor, Clear."
+    )
+    st.markdown("**Sensor:** Sentinel-2 SR (ESA / Copernicus)")
+    st.markdown("**Data:** Google Earth Engine")
+    st.markdown("**Question:** Where is vegetation encroaching on the corridor — and how fast?")
+
+with col10:
+    st.markdown("#### 🌊 Flood Intelligence")
+    st.markdown(
+        "Flood extent detection using Sentinel-1 SAR radar and four supporting layers. "
+        "SAR penetrates cloud cover — making it the only viable sensor during a flood event, "
+        "when cloud cover is heaviest. Detects new inundation, excludes permanent water bodies, "
+        "and produces a five-element impact brief for field teams and emergency coordinators."
+    )
+    st.markdown("**Sensor:** Sentinel-1 GRD, Sentinel-2 SR, SRTM DEM, JRC Global Surface Water")
+    st.markdown("**Data:** Google Earth Engine")
+    st.markdown("**Question:** Where did flooding occur — and what does it mean for infrastructure and response?")
+
+st.divider()
+
 st.markdown("### How to get started")
 st.markdown(
     "Use the **sidebar on the left** to navigate between modules. "
