@@ -555,16 +555,28 @@ def _build_word_doc(results: dict, brief_text: str, model_used: str,
     if sar_fig_bytes:
         doc.add_picture(io.BytesIO(sar_fig_bytes), width=Inches(6.0))
 
-    for url, caption in [
-        (r['url_flood'], 'Flood Classification Map (blue=permanent, orange=SAR flood, red=confirmed)'),
-    ]:
-        raw = _fetch_png(url)
-        if raw:
-            try:
-                doc.add_picture(io.BytesIO(raw), width=Inches(3.5))
-                doc.add_paragraph(caption).runs[0].font.size = Pt(9) if doc.paragraphs[-1].runs else None
-            except Exception:
-                doc.add_paragraph(f'[{caption} — image unavailable]')
+    # Spacer + separator before flood classification map
+    doc.add_paragraph()
+    sep = doc.add_paragraph()
+    sep.paragraph_format.space_before = Pt(4)
+    sep.paragraph_format.space_after  = Pt(4)
+    sep_run = sep.add_run('─' * 60)
+    sep_run.font.color.rgb = RGBColor(0xCC, 0xCC, 0xCC)
+    sep_run.font.size      = Pt(9)
+
+    p_map = doc.add_paragraph()
+    p_map.add_run('Flood Classification Map').bold = True
+    p_map.runs[0].font.size = Pt(11)
+    cap = doc.add_paragraph('Blue = permanent water  ·  Orange = SAR-only flood  ·  Red = confirmed flood (SAR + NDWI)')
+    cap.runs[0].font.size   = Pt(9)
+    cap.runs[0].font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+    flood_raw = _fetch_png(r['url_flood'])
+    if flood_raw:
+        try:
+            doc.add_picture(io.BytesIO(flood_raw), width=Inches(3.5))
+        except Exception:
+            doc.add_paragraph('[Flood classification map — image unavailable]')
     doc.add_paragraph()
 
     # Impact brief
@@ -851,12 +863,12 @@ The red areas are your flood candidates before the slope and water masks are app
         "Only pixels that passed all relevant tests appear as flood."
     )
 
-    col_map, col_legend = st.columns([3, 1])
+    col_map, col_legend = st.columns([2, 1])
     with col_map:
         flood_raw = _fetch_png(r["url_flood"])
         if flood_raw:
-            st.image(flood_raw, use_column_width=True,
-                     caption="Flood classification — Sindh, Pakistan 2022")
+            st.image(flood_raw, width=380,
+                     caption="Flood classification map")
         else:
             st.warning("Flood classification map unavailable.")
     with col_legend:
