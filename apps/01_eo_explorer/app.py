@@ -1613,7 +1613,7 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
             st.download_button("⬇️ Download image", data=buf.getvalue(),
                                file_name=fname, mime="image/png", key="se_dl_single")
             st.divider()
-            contact_btn = st.button("📋 Compare All Views", key="se_contact", use_container_width=True)
+            contact_btn = st.button("📋 View All Band Combinations", key="se_contact", use_container_width=True)
 
         with col_info:
             st.markdown("**Scene details**")
