@@ -895,15 +895,12 @@ def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> d
             if resp.status_code != 200:
                 continue
             data = resp.json()
-            # Response: {"properties": {"statistics": {"band_name": {"mean": ...}}}}
-            # or        {"band_name": {"mean": ...}}  depending on version
-            stats_block = data.get("properties", data)
-            stats = stats_block.get("statistics", stats_block)
-            # The key inside statistics may be the band name or "b1"
-            band_stats = stats.get(band) or stats.get("b1") or next(iter(stats.values()), None)
-            if band_stats is None:
+            # Response is a flat dict: {"B08_b1": {"min":..,"max":..,"mean":..}}
+            # Take the first (and only) entry regardless of key name.
+            band_stats = next(iter(data.values()), None)
+            if band_stats is None or "mean" not in band_stats:
                 continue
-            mean_dn = float(band_stats.get("mean", 0))
+            mean_dn = float(band_stats["mean"])
             if mean_dn <= 0:
                 continue
 
