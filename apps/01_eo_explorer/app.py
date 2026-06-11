@@ -1720,16 +1720,14 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     if result.get("channels"):
                         st.caption(f"📡 {result['channels']}")
 
-        # ---- Compute index stats — use full results list so index items not
-        # filtered out by the valid (max>0) check still contribute their labels.
-        _all_results = st.session_state.get("se_contact_results_all") or valid
+        # ---- Compute index stats from spectral signature band reflectances.
+        # More reliable than expression renders — uses bands already fetched.
+        _sig_for_idx = st.session_state.se_spectral_sig or {}
         try:
-            _computed = spectral_explorer.compute_index_stats(_all_results, _c_sat)
+            _computed = spectral_explorer.compute_index_stats(_sig_for_idx, _c_sat)
             st.session_state.se_index_stats = _computed if _computed else {}
-        except Exception as _e:
+        except Exception:
             st.session_state.se_index_stats = {}
-        # TEMP DEBUG
-        st.caption(f"all_results count={len(_all_results)}  labels={[r.get('label') for r in _all_results]}  stats={st.session_state.se_index_stats}")
 
         # ---- Compute spectral signature (once per contact sheet run) ----
         if st.session_state.se_spectral_sig is None and st.session_state.se_best_item:
@@ -1746,16 +1744,15 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         _idx_stats = st.session_state.se_index_stats or {}
         _valid_idx = {k: v for k, v in _idx_stats.items() if v}
         if _valid_idx:
-            st.markdown("#### Spectral Index Statistics")
-            st.caption("Values represent the 5th–95th percentile range of valid pixels. Derived from rendered pixel values.")
+            st.markdown("#### Spectral Index Values")
+            st.caption("Computed from mean band reflectances. Values are scene averages.")
             import pandas as pd
             _idx_rows = []
             for _iname, _is in _valid_idx.items():
                 _idx_rows.append({
-                    "Index": _iname,
-                    "Min":   f"{_is['min']:+.3f}",
-                    "Mean":  f"{_is['mean']:+.3f}",
-                    "Max":   f"{_is['max']:+.3f}",
+                    "Index":          _iname,
+                    "Scene Value":    f"{_is['value']:+.3f}",
+                    "Interpretation": _is["interpretation"],
                 })
             st.dataframe(pd.DataFrame(_idx_rows), use_container_width=True, hide_index=True)
 
@@ -1801,11 +1798,11 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
             for _r in valid:
                 _md_lines.append(f"- **{_r['label']}** — {_r['note']}")
             if _valid_idx:
-                _md_lines += ["", "## Spectral Index Statistics", ""]
-                _md_lines.append("| Index | Min | Mean | Max |")
-                _md_lines.append("|-------|-----|------|-----|")
+                _md_lines += ["", "## Spectral Index Values", ""]
+                _md_lines.append("| Index | Scene Value | Interpretation |")
+                _md_lines.append("|-------|------------|----------------|")
                 for _iname, _is in _valid_idx.items():
-                    _md_lines.append(f"| {_iname} | {_is['min']:+.3f} | {_is['mean']:+.3f} | {_is['max']:+.3f} |")
+                    _md_lines.append(f"| {_iname} | {_is['value']:+.3f} | {_is['interpretation']} |")
             _md_lines += ["", "## AI Interpretation", "", st.session_state.se_ai_result]
             _md_str = "\n".join(_md_lines)
 

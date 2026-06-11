@@ -742,101 +742,124 @@ _BAND_WAVELENGTHS = {
 }
 
 
-def compute_index_stats(contact_results: list, satellite_key: str) -> dict:
-    """Derive approximate index statistics from the already-rendered contact sheet images.
+def compute_index_stats(spectral_sig: dict, satellite_key: str) -> dict:
+    """Compute spectral index values from mean band reflectances.
 
-    Each index image is RGB with a known colormap applied over a known rescale range.
-    We decode the dominant colour channel position back to an approximate index value.
-    No new API calls — uses images that are already successfully rendered.
+    Uses the spectral signature (already computed from band renders) rather than
+    expression-based API calls, which are unreliable when the contact sheet hits
+    rate limits. Returns one scene-average value per index plus an interpretation.
 
-    Returns a dict keyed by index name: {'min': float, 'mean': float, 'max': float} or None.
+    Returns a dict keyed by index name:
+        {'value': float, 'interpretation': str}
     """
+    if not spectral_sig:
+        return {}
+
     sat = satellite_catalog.SATELLITES.get(satellite_key, {})
     if sat.get("sar"):
         return {}
 
-    # Colormap decoding rules per index
-    # method describes how to read colormap position (0=low end, 1=high end) from RGB
-    _DECODE = {
-        "NDVI": {"rescale": (-1.0,  1.0), "method": "rdylgn"},
-        "NDWI": {"rescale": (-1.0,  1.0), "method": "blues"},
-        "NDMI": {"rescale": (-0.5,  0.5), "method": "blues"},
-        "NBR":  {"rescale": (-1.0,  1.0), "method": "bwr"},
-        "SAVI": {"rescale": ( 0.0,  0.8), "method": "greens"},
-        "EVI":  {"rescale": (-0.2,  1.0), "method": "rdylgn"},
-        "BSI":  {"rescale": (-0.5,  0.5), "method": "ylrd"},
-    }
+    # Extract mean reflectance per band
+    def r(band):
+        entry = spectral_sig.get(band)
+        return entry["mean_reflectance"] if entry else None
+
+    if satellite_key == "Sentinel-2 L2A":
+        blue = r("B02"); green = r("B03"); red = r("B04")
+        nir  = r("B08"); swir1 = r("B11"); swir2 = r("B12")
+    elif satellite_key == "Landsat 8/9":
+        blue = r("blue"); green = r("green"); red = r("red")
+        nir  = r("nir08"); swir1 = r("swir16"); swir2 = r("swir22")
+    else:
+        return {}
+
+    def norm_diff(a, b):
+        if a is None or b is None or (a + b) == 0:
+            return None
+        return round((a - b) / (a + b), 3)
+
+    def interpret_ndvi(v):
+        if v is None: return "—"
+        if v < -0.1: return "Water or snow"
+        if v < 0.1:  return "Bare soil or urban"
+        if v < 0.3:  return "Sparse or stressed vegetation"
+        if v < 0.5:  return "Moderate vegetation"
+        return "Dense healthy vegetation"
+
+    def interpret_ndwi(v):
+        if v is None: return "—"
+        if v > 0.2:  return "Open water present"
+        if v > 0.0:  return "High moisture or wetland"
+        if v > -0.2: return "Dry surface, trace moisture"
+        return "Very dry — no surface water"
+
+    def interpret_ndmi(v):
+        if v is None: return "—"
+        if v > 0.2:  return "High canopy moisture"
+        if v > 0.0:  return "Moderate moisture"
+        if v > -0.2: return "Low moisture — stress likely"
+        return "Very dry vegetation or bare soil"
+
+    def interpret_nbr(v):
+        if v is None: return "—"
+        if v > 0.4:  return "Healthy unburned vegetation"
+        if v > 0.1:  return "Low severity or recovering"
+        if v > -0.1: return "Moderate burn or bare soil"
+        return "High severity burn scar"
+
+    def interpret_savi(v):
+        if v is None: return "—"
+        if v < 0.1:  return "Bare soil or urban"
+        if v < 0.2:  return "Sparse vegetation"
+        if v < 0.4:  return "Moderate vegetation cover"
+        return "Dense vegetation"
+
+    def interpret_evi(v):
+        if v is None: return "—"
+        if v < 0.1:  return "Non-vegetated surface"
+        if v < 0.2:  return "Open shrubland or grassland"
+        if v < 0.4:  return "Moderate forest or cropland"
+        return "Dense forest canopy"
+
+    def interpret_bsi(v):
+        if v is None: return "—"
+        if v > 0.2:  return "High bare soil exposure"
+        if v > 0.0:  return "Moderate soil exposure"
+        if v > -0.1: return "Mixed soil and vegetation"
+        return "Vegetated — low soil exposure"
 
     results = {}
-    for result in contact_results:
-        label = result.get("label", "")
-        if label not in _DECODE:
-            continue
-        arr = result.get("array")
-        if arr is None or arr.ndim < 3:
-            results[label] = None
-            continue
 
-        info = _DECODE[label]
-        lo, hi = info["rescale"]
-        method = info["method"]
-        f = arr.astype(np.float32)
-        R, G, B = f[:, :, 0], f[:, :, 1], f[:, :, 2]
+    ndvi = norm_diff(nir, red)
+    if ndvi is not None:
+        results["NDVI"] = {"value": ndvi, "interpretation": interpret_ndvi(ndvi)}
 
-        if method == "rdylgn":
-            # Red-Yellow-Green: green=high, yellow=mid, red=low
-            # pos = G / (R + G) — ranges 0 (all red) to ~0.5 (yellow) to 1 (all green)
-            denom = R + G + 1e-4
-            valid = denom > 20
-            if not valid.any():
-                results[label] = None; continue
-            pos = G[valid] / denom[valid]  # 0-1
+    ndwi = norm_diff(green, nir)
+    if ndwi is not None:
+        results["NDWI"] = {"value": ndwi, "interpretation": interpret_ndwi(ndwi)}
 
-        elif method == "blues":
-            # Pale-to-dark-blue: dark=high, pale=low
-            # Blue channel increases as value increases
-            valid = (B > 10)
-            if not valid.any():
-                results[label] = None; continue
-            # Invert: pale (high RGB) = low; dark blue = high
-            brightness = (R[valid] + G[valid] + B[valid]) / (3 * 255.0)
-            pos = 1.0 - brightness  # 0=pale/low, 1=dark/high
+    ndmi = norm_diff(nir, swir1)
+    if ndmi is not None:
+        results["NDMI"] = {"value": ndmi, "interpretation": interpret_ndmi(ndmi)}
 
-        elif method == "bwr":
-            # Blue-White-Red: blue=low/negative, white=zero, red=high/positive
-            denom = R + B + 1e-4
-            valid = denom > 20
-            if not valid.any():
-                results[label] = None; continue
-            pos = R[valid] / denom[valid]  # 0=all blue, 1=all red
+    nbr = norm_diff(nir, swir2)
+    if nbr is not None:
+        results["NBR"] = {"value": nbr, "interpretation": interpret_nbr(nbr)}
 
-        elif method == "greens":
-            # Pale-to-dark-green: dark green=high, pale=low
-            valid = G > 10
-            if not valid.any():
-                results[label] = None; continue
-            greenness = G[valid] / (R[valid] + G[valid] + B[valid] + 1e-4)
-            pos = greenness  # higher green fraction = higher value
+    if nir is not None and red is not None and (nir + red + 0.5) != 0:
+        savi = round(1.5 * (nir - red) / (nir + red + 0.5), 3)
+        results["SAVI"] = {"value": savi, "interpretation": interpret_savi(savi)}
 
-        elif method == "ylrd":
-            # Yellow-Orange-Red: yellow=low, red=high
-            denom = R + G + 1e-4
-            valid = denom > 20
-            if not valid.any():
-                results[label] = None; continue
-            # Red dominant vs yellow (R≈G): pos = (R - G) / R
-            pos = np.clip((R[valid] - G[valid]) / (R[valid] + 1e-4), 0, 1)
+    if all(x is not None for x in [nir, red, blue]) and (nir + 6*red - 7.5*blue + 1) != 0:
+        evi = round(2.5 * (nir - red) / (nir + 6*red - 7.5*blue + 1), 3)
+        results["EVI"] = {"value": evi, "interpretation": interpret_evi(evi)}
 
-        else:
-            results[label] = None
-            continue
-
-        vals = pos * (hi - lo) + lo
-        results[label] = {
-            "min":  float(np.percentile(vals, 5)),
-            "mean": float(np.mean(vals)),
-            "max":  float(np.percentile(vals, 95)),
-        }
+    if all(x is not None for x in [swir1, red, nir, blue]):
+        bsi_num = (swir1 + red) - (nir + blue)
+        bsi_den = (swir1 + red) + (nir + blue)
+        if bsi_den != 0:
+            bsi = round(bsi_num / bsi_den, 3)
+            results["BSI"] = {"value": bsi, "interpretation": interpret_bsi(bsi)}
 
     return results
 
@@ -1099,22 +1122,19 @@ def build_spectral_docx(contact_results, index_stats, spectral_sig,
 
     # ---- Index statistics table ----
     if index_stats:
-        doc.add_heading("Spectral Index Statistics", level=1)
-        doc.add_paragraph(
-            "Values represent the 5th–95th percentile range of valid pixels in the scene."
-        )
-        idx_tbl = doc.add_table(rows=1, cols=4)
+        doc.add_heading("Spectral Index Values", level=1)
+        doc.add_paragraph("Computed from mean band reflectances. Values are scene averages.")
+        idx_tbl = doc.add_table(rows=1, cols=3)
         idx_tbl.style = "Table Grid"
-        for cell, txt in zip(idx_tbl.rows[0].cells, ["Index", "Min", "Mean", "Max"]):
+        for cell, txt in zip(idx_tbl.rows[0].cells, ["Index", "Scene Value", "Interpretation"]):
             cell.text = txt
             cell.paragraphs[0].runs[0].bold = True
         for idx_name, stats in index_stats.items():
             if stats:
                 row = idx_tbl.add_row().cells
                 row[0].text = idx_name
-                row[1].text = f"{stats['min']:+.3f}"
-                row[2].text = f"{stats['mean']:+.3f}"
-                row[3].text = f"{stats['max']:+.3f}"
+                row[1].text = f"{stats['value']:+.3f}"
+                row[2].text = stats.get("interpretation", "")
         doc.add_paragraph()
 
     # ---- Band reference table ----
