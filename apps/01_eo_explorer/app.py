@@ -1720,16 +1720,7 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     if result.get("channels"):
                         st.caption(f"📡 {result['channels']}")
 
-        # ---- Compute index stats from spectral signature band reflectances.
-        # More reliable than expression renders — uses bands already fetched.
-        _sig_for_idx = st.session_state.se_spectral_sig or {}
-        try:
-            _computed = spectral_explorer.compute_index_stats(_sig_for_idx, _c_sat)
-            st.session_state.se_index_stats = _computed if _computed else {}
-        except Exception:
-            st.session_state.se_index_stats = {}
-
-        # ---- Compute spectral signature (once per contact sheet run) ----
+        # ---- Compute spectral signature first (index stats depend on it) ----
         if st.session_state.se_spectral_sig is None and st.session_state.se_best_item:
             with st.spinner("Computing spectral signature..."):
                 try:
@@ -1737,8 +1728,16 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     st.session_state.se_spectral_sig = spectral_explorer.compute_spectral_signature(
                         st.session_state.se_best_item, _c_sat, bbox=_bbox_for_sig
                     )
-                except Exception as _e:
+                except Exception:
                     st.session_state.se_spectral_sig = {}
+
+        # ---- Compute index stats from spectral signature band reflectances ----
+        _sig_for_idx = st.session_state.se_spectral_sig or {}
+        try:
+            _computed = spectral_explorer.compute_index_stats(_sig_for_idx, _c_sat)
+            st.session_state.se_index_stats = _computed if _computed else {}
+        except Exception:
+            st.session_state.se_index_stats = {}
 
         # ---- Index statistics table ----
         _idx_stats = st.session_state.se_index_stats or {}
