@@ -56,18 +56,19 @@ FLOOD_EVENTS = {
         "sar_threshold": -3.0,
         "orbit": "DESCENDING",
     },
-    "Bangladesh 2020 — Brahmaputra, Sylhet Division": {
-        "bbox":         [90.5, 24.0, 92.5, 25.5],
-        "center":       [24.8, 91.5],
-        "zoom":         8,
-        "before_start": "2020-06-01",
-        "before_end":   "2020-06-30",
-        "after_start":  "2020-07-01",
-        "after_end":    "2020-08-15",
+    "Spain 2024 — Valencia DANA Floods, Horta Sud": {
+        "bbox":         [-0.75, 39.25, -0.05, 39.65],
+        "center":       [39.45, -0.40],
+        "zoom":         9,
+        "before_start": "2024-09-01",
+        "before_end":   "2024-10-27",
+        "after_start":  "2024-10-28",
+        "after_end":    "2024-11-30",
         "context": (
-            "Severe monsoon flooding along the Brahmaputra and Meghna river systems. "
-            "Sylhet, Mymensingh and Jamalpur divisions heavily affected. "
-            "Cloud cover during monsoon season makes SAR the primary detection sensor."
+            "DANA cold drop weather event on 29 October 2024. Over 220 deaths, "
+            "the worst flooding in Spain in living memory. The Horta Sud agricultural "
+            "plain south of Valencia was submerged under 1–2 metres of water. "
+            "Flat harvested farmland produces a clean SAR backscatter decrease signal."
         ),
         "sar_threshold": -3.0,
         "orbit": "DESCENDING",
