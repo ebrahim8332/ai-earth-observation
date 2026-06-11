@@ -1192,6 +1192,7 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         ("se_spectral_sig",      None),
         ("se_ai_result",         None),
         ("se_ai_model",          None),
+        ("se_docx_bytes",        None),
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
@@ -1673,12 +1674,13 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                 "location_label":location_label,
             }
             # Store bbox so index stats + spectral sig fetches use the same crop
-            st.session_state.se_bbox       = bbox_se
+            st.session_state.se_bbox        = bbox_se
             # Reset computed stats — new contact sheet means new scene
-            st.session_state.se_index_stats = None
+            st.session_state.se_index_stats  = None
             st.session_state.se_spectral_sig = None
-            st.session_state.se_ai_result   = None
-            st.session_state.se_ai_model    = None
+            st.session_state.se_ai_result    = None
+            st.session_state.se_ai_model     = None
+            st.session_state.se_docx_bytes   = None
 
     # -----------------------------------------------------------------------
     # DISPLAY COMPARE ALL VIEWS — always shown if results exist in session state
@@ -1715,16 +1717,14 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     if result.get("channels"):
                         st.caption(f"📡 {result['channels']}")
 
-        # ---- Compute index stats (once per contact sheet run) ----
-        if st.session_state.se_index_stats is None and st.session_state.se_best_item:
-            with st.spinner("Computing spectral index statistics..."):
-                try:
-                    _bbox_for_stats = st.session_state.get("se_bbox")
-                    st.session_state.se_index_stats = spectral_explorer.compute_index_stats(
-                        st.session_state.se_best_item, _c_sat, bbox=_bbox_for_stats
-                    )
-                except Exception as _e:
-                    st.session_state.se_index_stats = {}  # empty = computed but failed
+        # ---- Compute index stats from the already-rendered contact results ----
+        if st.session_state.se_index_stats is None:
+            try:
+                st.session_state.se_index_stats = spectral_explorer.compute_index_stats(
+                    valid, _c_sat
+                )
+            except Exception:
+                st.session_state.se_index_stats = {}
 
         # ---- Compute spectral signature (once per contact sheet run) ----
         if st.session_state.se_spectral_sig is None and st.session_state.se_best_item:
@@ -1813,28 +1813,33 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                 use_container_width=True,
             )
 
-        # Word download
+        # Word download — generate bytes into session state so the download button persists
         with _dl_col2:
             if st.button("⬇️ Generate Word Doc", key="se_word_btn", use_container_width=True):
                 with st.spinner("Building Word document..."):
-                    _docx_bytes = spectral_explorer.build_spectral_docx(
-                        contact_results=valid,
-                        index_stats=_valid_idx,
-                        spectral_sig=_sig,
-                        location_name=_c_loc,
-                        scene_date=_c_date,
-                        scene_cloud=_c_cloud,
-                        satellite_key=_c_sat,
-                        ai_text=st.session_state.se_ai_result or "",
-                        ai_model=st.session_state.se_ai_model or "",
-                    )
-                    st.download_button(
-                        "⬇️ Download Word (.docx)",
-                        data=_docx_bytes,
-                        file_name=f"spectral_explorer_{_c_loc.replace(' ', '_')}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True,
-                    )
+                    try:
+                        st.session_state.se_docx_bytes = spectral_explorer.build_spectral_docx(
+                            contact_results=valid,
+                            index_stats=_valid_idx,
+                            spectral_sig=_sig,
+                            location_name=_c_loc,
+                            scene_date=_c_date,
+                            scene_cloud=_c_cloud,
+                            satellite_key=_c_sat,
+                            ai_text=st.session_state.se_ai_result or "",
+                            ai_model=st.session_state.se_ai_model or "",
+                        )
+                    except Exception as _de:
+                        st.error(f"Word doc error: {_de}")
+
+        if st.session_state.get("se_docx_bytes"):
+            st.download_button(
+                "⬇️ Download Word (.docx)",
+                data=st.session_state.se_docx_bytes,
+                file_name=f"spectral_explorer_{_c_loc.replace(' ', '_')}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
 
     # Stop here — do not render the EO Explorer below
     st.stop()

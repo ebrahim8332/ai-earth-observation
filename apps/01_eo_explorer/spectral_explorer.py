@@ -742,52 +742,101 @@ _BAND_WAVELENGTHS = {
 }
 
 
-def compute_index_stats(item, satellite_key: str, bbox: list = None) -> dict:
-    """Fetch each spectral index as a greyscale image and compute min/mean/max.
+def compute_index_stats(contact_results: list, satellite_key: str) -> dict:
+    """Derive approximate index statistics from the already-rendered contact sheet images.
 
-    Pixel values (0-255) are mapped back to real index values using the known
-    rescale range for each index. Returns a dict keyed by index name.
-    Each value is {'min': float, 'mean': float, 'max': float} or None on failure.
+    Each index image is RGB with a known colormap applied over a known rescale range.
+    We decode the dominant colour channel position back to an approximate index value.
+    No new API calls — uses images that are already successfully rendered.
+
+    Returns a dict keyed by index name: {'min': float, 'mean': float, 'max': float} or None.
     """
-    sat = satellite_catalog.SATELLITES[satellite_key]
+    sat = satellite_catalog.SATELLITES.get(satellite_key, {})
     if sat.get("sar"):
         return {}
 
-    expressions = _INDEX_EXPRESSIONS.get(satellite_key, {})
-    results = {}
+    # Colormap decoding rules per index
+    # method describes how to read colormap position (0=low end, 1=high end) from RGB
+    _DECODE = {
+        "NDVI": {"rescale": (-1.0,  1.0), "method": "rdylgn"},
+        "NDWI": {"rescale": (-1.0,  1.0), "method": "blues"},
+        "NDMI": {"rescale": (-0.5,  0.5), "method": "blues"},
+        "NBR":  {"rescale": (-1.0,  1.0), "method": "bwr"},
+        "SAVI": {"rescale": ( 0.0,  0.8), "method": "greens"},
+        "EVI":  {"rescale": (-0.2,  1.0), "method": "rdylgn"},
+        "BSI":  {"rescale": (-0.5,  0.5), "method": "ylrd"},
+    }
 
-    for idx_name, expr in expressions.items():
-        lo, hi = _INDEX_RESCALE[idx_name]
-        params = [
-            ("collection",    sat["collection"]),
-            ("item",          item.id),
-            ("expression",    expr),
-            ("colormap_name", "greys"),
-            ("rescale",       f"{lo},{hi}"),
-            ("width",         "200"),
-            ("height",        "200"),
-        ]
-        if bbox:
-            params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
-        try:
-            resp = requests.get(PC_RENDER_URL, params=params, timeout=30)
-            if resp.status_code != 200:
-                results[idx_name] = None
-                continue
-            arr = np.array(Image.open(BytesIO(resp.content)).convert("L"), dtype=np.float32)
-            # Remove nodata (pure black or pure white borders)
-            valid = (arr > 5) & (arr < 250)
+    results = {}
+    for result in contact_results:
+        label = result.get("label", "")
+        if label not in _DECODE:
+            continue
+        arr = result.get("array")
+        if arr is None or arr.ndim < 3:
+            results[label] = None
+            continue
+
+        info = _DECODE[label]
+        lo, hi = info["rescale"]
+        method = info["method"]
+        f = arr.astype(np.float32)
+        R, G, B = f[:, :, 0], f[:, :, 1], f[:, :, 2]
+
+        if method == "rdylgn":
+            # Red-Yellow-Green: green=high, yellow=mid, red=low
+            # pos = G / (R + G) — ranges 0 (all red) to ~0.5 (yellow) to 1 (all green)
+            denom = R + G + 1e-4
+            valid = denom > 20
             if not valid.any():
-                results[idx_name] = None
-                continue
-            vals = arr[valid] / 255.0 * (hi - lo) + lo
-            results[idx_name] = {
-                "min":  float(np.percentile(vals, 5)),
-                "mean": float(np.mean(vals)),
-                "max":  float(np.percentile(vals, 95)),
-            }
-        except Exception:
-            results[idx_name] = None
+                results[label] = None; continue
+            pos = G[valid] / denom[valid]  # 0-1
+
+        elif method == "blues":
+            # Pale-to-dark-blue: dark=high, pale=low
+            # Blue channel increases as value increases
+            valid = (B > 10)
+            if not valid.any():
+                results[label] = None; continue
+            # Invert: pale (high RGB) = low; dark blue = high
+            brightness = (R[valid] + G[valid] + B[valid]) / (3 * 255.0)
+            pos = 1.0 - brightness  # 0=pale/low, 1=dark/high
+
+        elif method == "bwr":
+            # Blue-White-Red: blue=low/negative, white=zero, red=high/positive
+            denom = R + B + 1e-4
+            valid = denom > 20
+            if not valid.any():
+                results[label] = None; continue
+            pos = R[valid] / denom[valid]  # 0=all blue, 1=all red
+
+        elif method == "greens":
+            # Pale-to-dark-green: dark green=high, pale=low
+            valid = G > 10
+            if not valid.any():
+                results[label] = None; continue
+            greenness = G[valid] / (R[valid] + G[valid] + B[valid] + 1e-4)
+            pos = greenness  # higher green fraction = higher value
+
+        elif method == "ylrd":
+            # Yellow-Orange-Red: yellow=low, red=high
+            denom = R + G + 1e-4
+            valid = denom > 20
+            if not valid.any():
+                results[label] = None; continue
+            # Red dominant vs yellow (R≈G): pos = (R - G) / R
+            pos = np.clip((R[valid] - G[valid]) / (R[valid] + 1e-4), 0, 1)
+
+        else:
+            results[label] = None
+            continue
+
+        vals = pos * (hi - lo) + lo
+        results[label] = {
+            "min":  float(np.percentile(vals, 5)),
+            "mean": float(np.mean(vals)),
+            "max":  float(np.percentile(vals, 95)),
+        }
 
     return results
 
@@ -832,7 +881,14 @@ def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> d
             mean_px = float(np.mean(arr[valid]))
             # Map pixel (0-255) back to DN, then normalise to 0-1 reflectance factor
             mean_dn = mean_px / 255.0 * (hi_r - lo_r) + lo_r
-            reflectance = mean_dn / 10000.0  # Sentinel-2 scale factor
+            # Convert DN to surface reflectance using satellite-specific scale factors
+            if satellite_key == "Landsat 8/9":
+                # Landsat C2 L2: reflectance = DN * 2.75e-5 - 0.2
+                reflectance = mean_dn * 2.75e-5 - 0.2
+            else:
+                # Sentinel-2 L2A: reflectance = DN / 10000
+                reflectance = mean_dn / 10000.0
+            reflectance = max(0.0, reflectance)
             results[band] = {
                 "wavelength":       wavelengths.get(band, 0),
                 "mean_reflectance": round(reflectance, 4),
