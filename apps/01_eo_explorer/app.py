@@ -4131,11 +4131,7 @@ with col7:
     st.markdown("**Data:** Planetary Computer (Microsoft)")
     st.markdown("**Question:** What land cover types are present — and how confident is the classification?")
 
-st.divider()
-
-col9, col10 = st.columns(2)
-
-with col9:
+with col8:
     st.markdown("#### ⚠️ Corridor Risk Intelligence")
     st.markdown(
         "Multi-algorithm vegetation encroachment analysis for utility transmission corridors. "
@@ -4147,7 +4143,11 @@ with col9:
     st.markdown("**Data:** Google Earth Engine")
     st.markdown("**Question:** Where is vegetation encroaching on the corridor — and how fast?")
 
-with col10:
+st.divider()
+
+col9, col10 = st.columns(2)
+
+with col9:
     st.markdown("#### 🌊 Flood Intelligence")
     st.markdown(
         "Flood extent detection using Sentinel-1 SAR radar and four supporting layers. "
