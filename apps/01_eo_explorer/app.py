@@ -1540,14 +1540,10 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         f"🔵 **{b_band}:** {sat_info['bands'][b_band]['description']}"
     )
 
-    # Render and Compare buttons sit here — after the band controls,
-    # because they act on the band selection the user just made.
+    # Render button sits here — acts on the band selection above.
     st.divider()
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        render_btn  = st.button("🖼️ Render selected combination", key="se_render",  use_container_width=True)
-    with col_btn2:
-        contact_btn = st.button("📋 Compare All Views",           key="se_contact", use_container_width=True)
+    render_btn  = st.button("🖼️ Render selected combination", key="se_render", use_container_width=True)
+    contact_btn = False  # defined below, near the download button
 
     # -----------------------------------------------------------------------
     # RENDER — runs only when button clicked, stores result in session state
@@ -1616,6 +1612,8 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
             )
             st.download_button("⬇️ Download image", data=buf.getvalue(),
                                file_name=fname, mime="image/png", key="se_dl_single")
+            st.divider()
+            contact_btn = st.button("📋 Compare All Views", key="se_contact", use_container_width=True)
 
         with col_info:
             st.markdown("**Scene details**")
