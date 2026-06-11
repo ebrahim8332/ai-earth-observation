@@ -876,8 +876,16 @@ def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> d
 
     band_list = _BAND_EXPRESSIONS.get(satellite_key, [])
     wavelengths = _BAND_WAVELENGTHS.get(satellite_key, {})
-    rescale = sat["rescale"]  # e.g. "0,3000" or "7000,22000"
-    lo_r, hi_r = [float(x) for x in rescale.split(",")]
+    # Use full-range rescale so NIR-bright surfaces (dense vegetation) are not
+    # clipped to 255. Display rescale ("0,3000") saturates Amazon NIR, making
+    # it indistinguishable from Red and producing NDVI ≈ 0.
+    if satellite_key == "Sentinel-2 L2A":
+        sig_rescale = "0,10000"   # full reflectance range (DN/10000 = 0–1)
+    elif satellite_key == "Landsat 8/9":
+        sig_rescale = "7000,44000"  # covers reflectance 0–1 via Landsat C2 L2 formula
+    else:
+        sig_rescale = sat["rescale"]
+    lo_r, hi_r = [float(x) for x in sig_rescale.split(",")]
     results = {}
 
     for band in band_list:
@@ -886,7 +894,7 @@ def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> d
             ("item",          item.id),
             ("assets",        band),
             ("asset_bidx",    f"{band}|1"),
-            ("rescale",       rescale),
+            ("rescale",       sig_rescale),
             ("colormap_name", "greys"),
             ("width",         "150"),
             ("height",        "150"),
@@ -898,7 +906,7 @@ def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> d
             if resp.status_code != 200:
                 continue
             arr = np.array(Image.open(BytesIO(resp.content)).convert("L"), dtype=np.float32)
-            valid = (arr > 5) & (arr < 250)
+            valid = (arr > 2) & (arr < 254)  # exclude nodata borders; allow bright NIR
             if not valid.any():
                 continue
             mean_px = float(np.mean(arr[valid]))
