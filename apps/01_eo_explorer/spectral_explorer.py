@@ -865,54 +865,54 @@ def compute_index_stats(spectral_sig: dict, satellite_key: str) -> dict:
 
 
 def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> dict:
-    """Fetch each optical band as greyscale and return mean reflectance per band.
+    """Read raw DN from each band COG and return mean surface reflectance per band.
+
+    Reads directly from the signed COG asset URL using rasterio — avoids the
+    render API which silently clips or distorts bright bands (e.g. NIR over
+    dense Amazon forest saturates with display rescale "0,3000").
 
     Returns a dict: band_name -> {'wavelength': int, 'mean_reflectance': float}
-    Reflectance is approximate (derived from rendered pixel values).
     """
+    import rasterio
+    from rasterio.windows import from_bounds
+
     sat = satellite_catalog.SATELLITES[satellite_key]
     if sat.get("sar"):
         return {}
 
     band_list = _BAND_EXPRESSIONS.get(satellite_key, [])
     wavelengths = _BAND_WAVELENGTHS.get(satellite_key, {})
-    # Use full-range rescale so NIR-bright surfaces (dense vegetation) are not
-    # clipped to 255. Display rescale ("0,3000") saturates Amazon NIR, making
-    # it indistinguishable from Red and producing NDVI ≈ 0.
-    if satellite_key == "Sentinel-2 L2A":
-        sig_rescale = "0,10000"   # full reflectance range (DN/10000 = 0–1)
-    elif satellite_key == "Landsat 8/9":
-        sig_rescale = "7000,44000"  # covers reflectance 0–1 via Landsat C2 L2 formula
-    else:
-        sig_rescale = sat["rescale"]
-    lo_r, hi_r = [float(x) for x in sig_rescale.split(",")]
     results = {}
 
     for band in band_list:
-        params = [
-            ("collection",    sat["collection"]),
-            ("item",          item.id),
-            ("assets",        band),
-            ("asset_bidx",    f"{band}|1"),
-            ("rescale",       sig_rescale),
-            ("colormap_name", "greys"),
-            ("width",         "150"),
-            ("height",        "150"),
-        ]
-        if bbox:
-            params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
+        asset = item.assets.get(band)
+        if asset is None:
+            continue
         try:
-            resp = requests.get(PC_RENDER_URL, params=params, timeout=30)
-            if resp.status_code != 200:
-                continue
-            arr = np.array(Image.open(BytesIO(resp.content)).convert("L"), dtype=np.float32)
-            valid = (arr > 2) & (arr < 254)  # exclude nodata borders; allow bright NIR
+            url = asset.href  # already signed by planetary_computer.sign_inplace
+            with rasterio.open(url) as src:
+                if bbox:
+                    win = from_bounds(bbox[0], bbox[1], bbox[2], bbox[3], src.transform)
+                    # Clamp window to dataset bounds
+                    win = win.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
+                    arr = src.read(1, window=win).astype(np.float32)
+                else:
+                    # Downsample to ~150×150 to keep it fast
+                    out_h = 150
+                    out_w = 150
+                    arr = src.read(
+                        1,
+                        out_shape=(out_h, out_w),
+                        resampling=rasterio.enums.Resampling.average,
+                    ).astype(np.float32)
+
+            nodata = src.nodata if src.nodata is not None else 0
+            valid = (arr > nodata) & np.isfinite(arr) & (arr > 0)
             if not valid.any():
                 continue
-            mean_px = float(np.mean(arr[valid]))
-            # Map pixel (0-255) back to DN, then normalise to 0-1 reflectance factor
-            mean_dn = mean_px / 255.0 * (hi_r - lo_r) + lo_r
-            # Convert DN to surface reflectance using satellite-specific scale factors
+            mean_dn = float(np.mean(arr[valid]))
+
+            # Convert DN to surface reflectance
             if satellite_key == "Landsat 8/9":
                 # Landsat C2 L2: reflectance = DN * 2.75e-5 - 0.2
                 reflectance = mean_dn * 2.75e-5 - 0.2
