@@ -865,16 +865,14 @@ def compute_index_stats(spectral_sig: dict, satellite_key: str) -> dict:
 
 
 def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> dict:
-    """Read raw DN from each band COG and return mean surface reflectance per band.
+    """Fetch per-band statistics from the PC Titiler statistics endpoint.
 
-    Reads directly from the signed COG asset URL using rasterio — avoids the
-    render API which silently clips or distorts bright bands (e.g. NIR over
-    dense Amazon forest saturates with display rescale "0,3000").
+    Uses /item/statistics which returns actual DN mean values — no display
+    rescaling, no clipping. One request per band.
 
     Returns a dict: band_name -> {'wavelength': int, 'mean_reflectance': float}
     """
-    import rasterio
-    from rasterio.windows import from_bounds
+    PC_STATS_URL = "https://planetarycomputer.microsoft.com/api/data/v1/item/statistics"
 
     sat = satellite_catalog.SATELLITES[satellite_key]
     if sat.get("sar"):
@@ -885,35 +883,33 @@ def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> d
     results = {}
 
     for band in band_list:
-        asset = item.assets.get(band)
-        if asset is None:
-            continue
+        params = [
+            ("collection", sat["collection"]),
+            ("item",       item.id),
+            ("assets",     band),
+        ]
+        if bbox:
+            params.append(("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"))
         try:
-            url = asset.href  # already signed by planetary_computer.sign_inplace
-            with rasterio.open(url) as src:
-                nd = src.nodata if src.nodata is not None else 0
-                if bbox:
-                    win = from_bounds(bbox[0], bbox[1], bbox[2], bbox[3], src.transform)
-                    win = win.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
-                    arr = src.read(1, window=win).astype(np.float32)
-                else:
-                    arr = src.read(
-                        1,
-                        out_shape=(150, 150),
-                        resampling=rasterio.enums.Resampling.average,
-                    ).astype(np.float32)
-
-            valid = (arr != nd) & np.isfinite(arr) & (arr > 0)
-            if not valid.any():
+            resp = requests.get(PC_STATS_URL, params=params, timeout=30)
+            if resp.status_code != 200:
                 continue
-            mean_dn = float(np.mean(arr[valid]))
+            data = resp.json()
+            # Response: {"properties": {"statistics": {"band_name": {"mean": ...}}}}
+            # or        {"band_name": {"mean": ...}}  depending on version
+            stats_block = data.get("properties", data)
+            stats = stats_block.get("statistics", stats_block)
+            # The key inside statistics may be the band name or "b1"
+            band_stats = stats.get(band) or stats.get("b1") or next(iter(stats.values()), None)
+            if band_stats is None:
+                continue
+            mean_dn = float(band_stats.get("mean", 0))
+            if mean_dn <= 0:
+                continue
 
-            # Convert DN to surface reflectance
             if satellite_key == "Landsat 8/9":
-                # Landsat C2 L2: reflectance = DN * 2.75e-5 - 0.2
                 reflectance = mean_dn * 2.75e-5 - 0.2
             else:
-                # Sentinel-2 L2A: reflectance = DN / 10000
                 reflectance = mean_dn / 10000.0
             reflectance = max(0.0, reflectance)
             results[band] = {
