@@ -891,23 +891,19 @@ def compute_spectral_signature(item, satellite_key: str, bbox: list = None) -> d
         try:
             url = asset.href  # already signed by planetary_computer.sign_inplace
             with rasterio.open(url) as src:
+                nd = src.nodata if src.nodata is not None else 0
                 if bbox:
                     win = from_bounds(bbox[0], bbox[1], bbox[2], bbox[3], src.transform)
-                    # Clamp window to dataset bounds
                     win = win.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
                     arr = src.read(1, window=win).astype(np.float32)
                 else:
-                    # Downsample to ~150×150 to keep it fast
-                    out_h = 150
-                    out_w = 150
                     arr = src.read(
                         1,
-                        out_shape=(out_h, out_w),
+                        out_shape=(150, 150),
                         resampling=rasterio.enums.Resampling.average,
                     ).astype(np.float32)
 
-            nodata = src.nodata if src.nodata is not None else 0
-            valid = (arr > nodata) & np.isfinite(arr) & (arr > 0)
+            valid = (arr != nd) & np.isfinite(arr) & (arr > 0)
             if not valid.any():
                 continue
             mean_dn = float(np.mean(arr[valid]))
