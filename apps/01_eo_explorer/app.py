@@ -14,6 +14,7 @@ v1.7  Day 11: Shared map picker added to all five modules; aspect ratio fix for 
 v1.8  Day 12: Emissions Explorer added (TROPOMI CH4/NO2/CO/SO2 via GEE)
 v1.9  Arc 1:  Land Cover Intelligence added (K-means + Random Forest on Sentinel-2 via Planetary Computer)
 v2.0  Arc 3:  Flood Intelligence added (Sentinel-1 SAR flood detection, NDWI, slope mask, JRC water mask)
+v2.1  Arc 5:  LiDAR Clearance Intelligence added (3DEP point cloud, RF classification, DBSCAN crown delineation)
 """
 
 import streamlit as st
@@ -38,6 +39,7 @@ import methane_explorer
 import land_cover
 import corridor_risk
 import flood_intelligence
+import lidar_intelligence
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -73,7 +75,7 @@ with st.sidebar:
     st.markdown("### Module")
     selected_module = st.radio(
         "Navigate",
-        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer", "🌫️ Emissions Explorer", "🌿 Land Cover Intelligence", "⚠️ Corridor Risk Intelligence", "🌊 Flood Intelligence"],
+        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer", "🌫️ Emissions Explorer", "🌿 Land Cover Intelligence", "⚠️ Corridor Risk Intelligence", "🌊 Flood Intelligence", "🌲 LiDAR Clearance Intelligence"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -4202,6 +4204,16 @@ if selected_module == "🌊 Flood Intelligence":
     st.stop()
 
 # ---------------------------------------------------------------------------
+# MODULE 10 — LiDAR Clearance Intelligence (Arc 5)
+# Airborne LiDAR point cloud classification, DBSCAN tree crown delineation,
+# clearance violation detection, AI inspection brief.
+# ---------------------------------------------------------------------------
+
+if selected_module == "🌲 LiDAR Clearance Intelligence":
+    lidar_intelligence.render()
+    st.stop()
+
+# ---------------------------------------------------------------------------
 # MODULE 0 — Welcome panel (default when Welcome is selected)
 # ---------------------------------------------------------------------------
 
@@ -4338,6 +4350,22 @@ with col9:
 
 st.divider()
 
+col11, col12 = st.columns(2)
+
+with col11:
+    st.markdown("#### 🌲 LiDAR Clearance Intelligence")
+    st.markdown(
+        "Airborne LiDAR point cloud analysis for transmission corridor vegetation management. "
+        "Classifies millions of 3D laser returns using Random Forest, delineates individual "
+        "tree crowns with DBSCAN, and flags any crown breaching the NERC FAC-003 clearance threshold. "
+        "Interactive 3D scatter, Canopy Height Model, and a five-element AI inspection brief."
+    )
+    st.markdown("**Sensor:** USGS 3DEP airborne LiDAR (simulated at USGS QL2 density)")
+    st.markdown("**Algorithms:** Random Forest classification, DBSCAN crown delineation, DTM/CHM derivation")
+    st.markdown("**Question:** Which trees are too close to the transmission line — and what should crews do about it?")
+
+st.divider()
+
 st.markdown("### How to get started")
 st.markdown(
     "Use the **sidebar on the left** to navigate between modules. "
@@ -4367,7 +4395,7 @@ with col_b:
 
 st.divider()
 st.caption(
-    "EOIL Portal v2.0 — Earth Observation Innovation Lab. Modules: Spectral, Time Series, SAR, Change Detection, AI Imagery Interpreter, Emissions Explorer, Land Cover Intelligence, Corridor Risk Intelligence, Flood Intelligence. "
+    "EOIL Portal v2.1 — Earth Observation Innovation Lab. Modules: Spectral, Time Series, SAR, Change Detection, AI Imagery Interpreter, Emissions Explorer, Land Cover Intelligence, Corridor Risk Intelligence, Flood Intelligence, LiDAR Clearance Intelligence. "
     "Built with Claude Code. "
     "Login and access controls will be added in a future version."
 )

@@ -16,3 +16,5 @@ scikit-learn
 matplotlib
 python-docx
 contextily
+laspy
+open3d
