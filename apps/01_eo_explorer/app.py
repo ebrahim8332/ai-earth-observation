@@ -4348,11 +4348,7 @@ with col9:
     st.markdown("**Data:** Google Earth Engine")
     st.markdown("**Question:** Where did flooding occur — and what does it mean for infrastructure and response?")
 
-st.divider()
-
-col11, col12 = st.columns(2)
-
-with col11:
+with col10:
     st.markdown("#### 🌲 LiDAR Clearance Intelligence")
     st.markdown(
         "Airborne LiDAR point cloud analysis for transmission corridor vegetation management. "
