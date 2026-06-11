@@ -73,6 +73,23 @@ FLOOD_EVENTS = {
         "sar_threshold": -3.0,
         "orbit": "DESCENDING",
     },
+    "Sudan 2020 — Nile Floods, Khartoum State": {
+        "bbox":         [32.2, 15.0, 34.5, 17.0],
+        "center":       [16.0, 33.3],
+        "zoom":         8,
+        "before_start": "2020-05-01",
+        "before_end":   "2020-07-31",
+        "after_start":  "2020-08-15",
+        "after_end":    "2020-09-30",
+        "context": (
+            "Worst Nile flooding in Sudan in over 100 years. August-September 2020. "
+            "Over 100 deaths, 500,000 people displaced across Khartoum, River Nile, and Kassala states. "
+            "The Blue Nile reached record levels, inundating flat semi-desert agricultural land "
+            "with minimal vegetation — ideal terrain for SAR backscatter change detection."
+        ),
+        "sar_threshold": -3.0,
+        "orbit": None,
+    },
     "Nigeria 2022 — Niger-Benue Confluence, Lokoja": {
         "bbox":         [6.2, 7.5, 7.8, 9.0],
         "center":       [8.2, 6.9],
