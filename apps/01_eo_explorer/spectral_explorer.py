@@ -796,15 +796,15 @@ def compute_index_stats(spectral_sig: dict, satellite_key: str) -> dict:
     def interpret_ndmi(v):
         if v is None: return "—"
         if v > 0.2:  return "High canopy moisture"
-        if v > 0.0:  return "Moderate moisture"
-        if v > -0.2: return "Low moisture — stress likely"
+        if v > 0.1:  return "Moderate moisture"
+        if v > -0.1: return "Low moisture — dry surface"
         return "Very dry vegetation or bare soil"
 
     def interpret_nbr(v):
         if v is None: return "—"
         if v > 0.4:  return "Healthy unburned vegetation"
         if v > 0.1:  return "Low severity or recovering"
-        if v > -0.1: return "Moderate burn or bare soil"
+        if v > -0.1: return "No fire detected — bare or urban"
         return "High severity burn scar"
 
     def interpret_savi(v):
