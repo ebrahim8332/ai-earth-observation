@@ -1746,6 +1746,7 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         # ---- Spectral signature chart ----
         _sig = st.session_state.se_spectral_sig or {}
         if _sig and not satellite_catalog.SATELLITES.get(_c_sat, {}).get("sar"):
+            st.divider()
             st.markdown("#### Spectral Signature")
             st.caption("Mean reflectance per band — shows how different surface types absorb or reflect each wavelength.")
             _sig_fig = spectral_explorer.build_spectral_signature_chart(_sig, _c_sat)
@@ -1766,6 +1767,7 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         }
 
         if _valid_idx:
+            st.divider()
             st.markdown("#### Spectral Index Values")
             st.caption("Each index is calculated from the band values shown in the chart above. The Bands Used column tells you which bars to compare.")
             import pandas as pd
