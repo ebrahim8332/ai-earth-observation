@@ -1721,6 +1721,10 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                         st.caption(f"📡 {result['channels']}")
 
         # ---- Compute spectral signature first (index stats depend on it) ----
+        # Recompute when item changes. Compare stored item ID to current best item.
+        _current_item_id = st.session_state.se_best_item.id if st.session_state.se_best_item else None
+        if st.session_state.get("se_sig_item_id") != _current_item_id:
+            st.session_state.se_spectral_sig = None
         if st.session_state.se_spectral_sig is None and st.session_state.se_best_item:
             with st.spinner("Computing spectral signature..."):
                 try:
@@ -1728,8 +1732,10 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     st.session_state.se_spectral_sig = spectral_explorer.compute_spectral_signature(
                         st.session_state.se_best_item, _c_sat, bbox=_bbox_for_sig
                     )
+                    st.session_state.se_sig_item_id = _current_item_id
                 except Exception:
                     st.session_state.se_spectral_sig = {}
+                    st.session_state.se_sig_item_id = _current_item_id
 
         # ---- Compute index stats from spectral signature band reflectances ----
         _sig_for_idx = st.session_state.se_spectral_sig or {}
