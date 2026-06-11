@@ -1718,14 +1718,13 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                         st.caption(f"📡 {result['channels']}")
 
         # ---- Compute index stats from the already-rendered contact results ----
-        # This runs immediately — no API calls, just reads the rendered arrays
-        if st.session_state.se_index_stats is None:
-            try:
-                _computed = spectral_explorer.compute_index_stats(valid, _c_sat)
-                st.session_state.se_index_stats = _computed if _computed else {}
-            except Exception as _idx_err:
-                st.session_state.se_index_stats = {}
-                st.caption(f"Index stats error: {_idx_err}")
+        # No API calls — reads numpy arrays already in memory. Always recompute so
+        # stale session state from a previous deploy never blocks the table.
+        try:
+            _computed = spectral_explorer.compute_index_stats(valid, _c_sat)
+            st.session_state.se_index_stats = _computed if _computed else {}
+        except Exception as _idx_err:
+            st.session_state.se_index_stats = {}
 
         # ---- Compute spectral signature (once per contact sheet run) ----
         if st.session_state.se_spectral_sig is None and st.session_state.se_best_item:
@@ -1741,8 +1740,6 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         # ---- Index statistics table ----
         _idx_stats = st.session_state.se_index_stats or {}
         _valid_idx = {k: v for k, v in _idx_stats.items() if v}
-        if not _valid_idx and _idx_stats is not None:
-            st.caption(f"Index stats: {len(_idx_stats)} computed, {len(_valid_idx)} valid — raw: {list(_idx_stats.keys())}")
         if _valid_idx:
             st.markdown("#### Spectral Index Statistics")
             st.caption("Values represent the 5th–95th percentile range of valid pixels. Derived from rendered pixel values.")
@@ -1779,74 +1776,71 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                 st.caption(f"Model: {st.session_state.se_ai_model}")
                 st.markdown(st.session_state.se_ai_result)
 
-        # ---- Downloads ----
-        st.markdown("#### Downloads")
-        _dl_col1, _dl_col2 = st.columns(2)
-
-        # Markdown download
-        _md_lines = [
-            f"# Spectral Explorer Report",
-            f"",
-            f"**Location:** {_c_loc}",
-            f"**Scene date:** {_c_date}",
-            f"**Satellite:** {_c_sat}",
-            f"**Cloud cover:** {_c_cloud:.1f}%",
-            f"",
-            f"## Band Combinations Rendered",
-            f"",
-        ]
-        for _r in valid:
-            _md_lines.append(f"- **{_r['label']}** — {_r['note']}")
-        if _valid_idx:
-            _md_lines += ["", "## Spectral Index Statistics", ""]
-            _md_lines.append("| Index | Min | Mean | Max |")
-            _md_lines.append("|-------|-----|------|-----|")
-            for _iname, _is in _valid_idx.items():
-                _md_lines.append(f"| {_iname} | {_is['min']:+.3f} | {_is['mean']:+.3f} | {_is['max']:+.3f} |")
+        # ---- Downloads — only shown after AI interpretation has been generated ----
         if st.session_state.se_ai_result:
+            st.markdown("#### Downloads")
+            _dl_col1, _dl_col2 = st.columns(2)
+
+            # Build markdown content
+            _md_lines = [
+                f"# Spectral Explorer Report",
+                f"",
+                f"**Location:** {_c_loc}",
+                f"**Scene date:** {_c_date}",
+                f"**Satellite:** {_c_sat}",
+                f"**Cloud cover:** {_c_cloud:.1f}%",
+                f"",
+                f"## Band Combinations Rendered",
+                f"",
+            ]
+            for _r in valid:
+                _md_lines.append(f"- **{_r['label']}** — {_r['note']}")
+            if _valid_idx:
+                _md_lines += ["", "## Spectral Index Statistics", ""]
+                _md_lines.append("| Index | Min | Mean | Max |")
+                _md_lines.append("|-------|-----|------|-----|")
+                for _iname, _is in _valid_idx.items():
+                    _md_lines.append(f"| {_iname} | {_is['min']:+.3f} | {_is['mean']:+.3f} | {_is['max']:+.3f} |")
             _md_lines += ["", "## AI Interpretation", "", st.session_state.se_ai_result]
-        _md_str = "\n".join(_md_lines)
+            _md_str = "\n".join(_md_lines)
 
-        with _dl_col1:
-            st.download_button(
-                "⬇️ Download Markdown",
-                data=_md_str,
-                file_name=f"spectral_explorer_{_c_loc.replace(' ', '_')}.md",
-                mime="text/markdown",
-                use_container_width=True,
-            )
+            with _dl_col1:
+                st.download_button(
+                    "⬇️ Download Markdown",
+                    data=_md_str,
+                    file_name=f"spectral_explorer_{_c_loc.replace(' ', '_')}.md",
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
 
-        # Word download — generate bytes into session state so the download button persists
-        with _dl_col2:
-            if st.button("⬇️ Generate Word Doc", key="se_word_btn", use_container_width=True):
-                with st.spinner("Building Word document..."):
-                    try:
-                        st.session_state.se_docx_bytes = spectral_explorer.build_spectral_docx(
-                            contact_results=valid,
-                            index_stats=_valid_idx,
-                            spectral_sig=_sig,
-                            location_name=_c_loc,
-                            scene_date=_c_date,
-                            scene_cloud=_c_cloud,
-                            satellite_key=_c_sat,
-                            ai_text=st.session_state.se_ai_result or "",
-                            ai_model=st.session_state.se_ai_model or "",
-                        )
-                    except Exception as _de:
-                        st.error(f"Word doc error: {_de}")
+            # Word download — store bytes in session state so download button persists
+            with _dl_col2:
+                if st.button("⬇️ Generate Word Doc", key="se_word_btn", use_container_width=True):
+                    with st.spinner("Building Word document..."):
+                        try:
+                            st.session_state.se_docx_bytes = spectral_explorer.build_spectral_docx(
+                                contact_results=valid,
+                                index_stats=_valid_idx,
+                                spectral_sig=_sig,
+                                location_name=_c_loc,
+                                scene_date=_c_date,
+                                scene_cloud=_c_cloud,
+                                satellite_key=_c_sat,
+                                ai_text=st.session_state.se_ai_result or "",
+                                ai_model=st.session_state.se_ai_model or "",
+                            )
+                        except Exception as _de:
+                            st.error(f"Word doc error: {_de}")
 
-        _docx_ready = st.session_state.get("se_docx_bytes")
-        if _docx_ready:
-            _docx_kb = len(_docx_ready) // 1024
-            st.caption(f"Word doc ready — {_docx_kb} KB")
-            st.download_button(
-                "⬇️ Download Word (.docx)",
-                data=_docx_ready,
-                file_name=f"spectral_explorer_{_c_loc.replace(' ', '_')}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key="se_docx_dl_btn",
-                use_container_width=True,
-            )
+            if st.session_state.get("se_docx_bytes"):
+                st.download_button(
+                    "⬇️ Download Word (.docx)",
+                    data=st.session_state.se_docx_bytes,
+                    file_name=f"spectral_explorer_{_c_loc.replace(' ', '_')}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="se_docx_dl_btn",
+                    use_container_width=True,
+                )
 
     # Stop here — do not render the EO Explorer below
     st.stop()
