@@ -28,7 +28,6 @@ from datetime import datetime
 import config
 import satellite_catalog
 import ai_assistant
-import ai_chain
 
 # Planetary Computer STAC API endpoint
 PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
@@ -958,6 +957,7 @@ without satellite imagery.
 
 Write in plain language. Use the bold section headings. Be direct and thorough."""
 
+    import ai_chain
     text, model = ai_chain.complete(
         prompt,
         groq_key=config.GROQ_API_KEY,

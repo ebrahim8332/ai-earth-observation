@@ -1718,18 +1718,24 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         # ---- Compute index stats (once per contact sheet run) ----
         if st.session_state.se_index_stats is None and st.session_state.se_best_item:
             with st.spinner("Computing spectral index statistics..."):
-                _bbox_for_stats = st.session_state.get("se_bbox")
-                st.session_state.se_index_stats = spectral_explorer.compute_index_stats(
-                    st.session_state.se_best_item, _c_sat, bbox=_bbox_for_stats
-                )
+                try:
+                    _bbox_for_stats = st.session_state.get("se_bbox")
+                    st.session_state.se_index_stats = spectral_explorer.compute_index_stats(
+                        st.session_state.se_best_item, _c_sat, bbox=_bbox_for_stats
+                    )
+                except Exception as _e:
+                    st.session_state.se_index_stats = {}  # empty = computed but failed
 
         # ---- Compute spectral signature (once per contact sheet run) ----
         if st.session_state.se_spectral_sig is None and st.session_state.se_best_item:
             with st.spinner("Computing spectral signature..."):
-                _bbox_for_sig = st.session_state.get("se_bbox")
-                st.session_state.se_spectral_sig = spectral_explorer.compute_spectral_signature(
-                    st.session_state.se_best_item, _c_sat, bbox=_bbox_for_sig
-                )
+                try:
+                    _bbox_for_sig = st.session_state.get("se_bbox")
+                    st.session_state.se_spectral_sig = spectral_explorer.compute_spectral_signature(
+                        st.session_state.se_best_item, _c_sat, bbox=_bbox_for_sig
+                    )
+                except Exception as _e:
+                    st.session_state.se_spectral_sig = {}
 
         # ---- Index statistics table ----
         _idx_stats = st.session_state.se_index_stats or {}
