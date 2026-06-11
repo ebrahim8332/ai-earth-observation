@@ -56,19 +56,19 @@ FLOOD_EVENTS = {
         "sar_threshold": -3.0,
         "orbit": "DESCENDING",
     },
-    "Spain 2024 — Valencia DANA Floods, Horta Sud": {
-        "bbox":         [-0.75, 39.25, -0.05, 39.65],
-        "center":       [39.45, -0.40],
-        "zoom":         9,
-        "before_start": "2024-09-01",
-        "before_end":   "2024-10-27",
-        "after_start":  "2024-10-28",
-        "after_end":    "2024-11-12",
+    "Mozambique 2019 — Cyclone Idai, Beira Coastal Plain": {
+        "bbox":         [33.5, -20.5, 35.5, -18.5],
+        "center":       [-19.8, 34.8],
+        "zoom":         8,
+        "before_start": "2019-01-01",
+        "before_end":   "2019-03-13",
+        "after_start":  "2019-03-15",
+        "after_end":    "2019-04-15",
         "context": (
-            "DANA cold drop weather event on 29 October 2024. Over 220 deaths, "
-            "the worst flooding in Spain in living memory. The Horta Sud agricultural "
-            "plain south of Valencia was submerged under 1–2 metres of water. "
-            "Flat harvested farmland produces a clean SAR backscatter decrease signal."
+            "Cyclone Idai made landfall near Beira on 14 March 2019. "
+            "Over 900 deaths, 1.85 million people affected across Mozambique, Zimbabwe, and Malawi. "
+            "The Buzi and Pungwe river floodplains submerged up to 400,000 hectares of crops. "
+            "The flat Mozambican coastal delta produces a clean SAR backscatter decrease signal."
         ),
         "sar_threshold": -3.0,
         "orbit": "DESCENDING",
