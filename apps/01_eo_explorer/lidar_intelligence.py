@@ -389,11 +389,77 @@ def _build_corridor_map(data: dict, corridor_key: str) -> bytes:
     return _fig_to_bytes(fig)
 
 
-def _export_3d_png(fig) -> bytes | None:
-    """Export the cached Plotly 3D scatter as a static PNG using kaleido."""
+def _build_3d_static_png(data: dict, corridor_key: str) -> bytes | None:
+    """Matplotlib static 3D point cloud — same colours as the interactive chart.
+    Used for Word doc and AI brief snapshot. Renders correctly without WebGL."""
     try:
-        import plotly.io as pio
-        return pio.to_image(fig, format='png', width=960, height=540, scale=1.5)
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+
+        CLASS_COLORS = {
+            2: '#8B5E3C', 3: '#90EE90', 4: '#228B22', 5: '#004d00', 6: '#888888',
+        }
+        CLASS_LABELS = {
+            2: 'Ground', 3: 'Low veg', 4: 'Medium veg', 5: 'High veg', 6: 'Building',
+        }
+
+        x        = data['x']
+        y        = data['y']
+        z        = data['z']
+        rf_class = data['rf_class']
+
+        # Same 50k subsample as the interactive chart
+        MAX_PTS = 50_000
+        if len(x) > MAX_PTS:
+            rng = np.random.default_rng(42)
+            idx = rng.choice(len(x), MAX_PTS, replace=False)
+            idx.sort()
+            x, y, z, rf_class = x[idx], y[idx], z[idx], rf_class[idx]
+
+        # Recompute violation flags
+        violating = data.get('tree_violating', np.array([], dtype=bool))
+        tree_cx   = data.get('tree_cx',    np.array([], dtype=np.float32))
+        tree_cy   = data.get('tree_cy',    np.array([], dtype=np.float32))
+        tree_r    = data.get('tree_radius', np.array([], dtype=np.float32))
+        violation_flag = np.zeros(len(x), dtype=bool)
+        for i in range(len(tree_cx)):
+            if len(violating) > i and violating[i]:
+                dist = np.sqrt((x - tree_cx[i])**2 + (y - tree_cy[i])**2)
+                violation_flag |= (dist < tree_r[i] * 1.2)
+
+        fig = plt.figure(figsize=(12, 6))
+        ax  = fig.add_subplot(111, projection='3d')
+        ax.set_facecolor('#f8f8f8')
+        fig.patch.set_facecolor('white')
+
+        # Non-violation points by class
+        for cls in [2, 3, 4, 5, 6]:
+            mask = (rf_class == cls) & ~violation_flag
+            if not mask.any():
+                continue
+            ax.scatter(x[mask], y[mask], z[mask],
+                       c=CLASS_COLORS.get(cls, '#cccccc'),
+                       s=0.3, alpha=0.5, label=CLASS_LABELS.get(cls, f'Class {cls}'),
+                       rasterized=True)
+
+        # Violation points on top — bright red, larger
+        if violation_flag.any():
+            ax.scatter(x[violation_flag], y[violation_flag], z[violation_flag],
+                       c='#FF2200', s=2.5, alpha=0.95, label='Clearance violation',
+                       zorder=5, rasterized=True)
+
+        ax.set_xlabel('X (m)', fontsize=8, labelpad=2)
+        ax.set_ylabel('Y (m)', fontsize=8, labelpad=2)
+        ax.set_zlabel('Elevation (m)', fontsize=8, labelpad=2)
+        ax.tick_params(labelsize=6)
+        ax.set_title(
+            f"Point cloud — {corridor_key.split('—')[0].strip()}\n"
+            "RF classification  |  red = clearance violation",
+            fontsize=10, fontweight='bold'
+        )
+        ax.legend(loc='upper left', fontsize=7, markerscale=4, framealpha=0.8)
+        ax.view_init(elev=22, azim=-60)
+        plt.tight_layout()
+        return _fig_to_bytes(fig)
     except Exception:
         return None
 
@@ -983,8 +1049,7 @@ step that turns a one-time survey into a predictive maintenance programme.
         # Export 3D PNG once and cache it
         png_key = cache_key + "_3d_png"
         if png_key not in st.session_state:
-            cached_fig = st.session_state.get(cache_key + "_fig3d")
-            st.session_state[png_key] = _export_3d_png(cached_fig) if cached_fig is not None else None
+            st.session_state[png_key] = _build_3d_static_png(data, corridor_key)
         fig_3d_bytes = st.session_state.get(png_key)
 
         # Show static 3D snapshot above the brief
