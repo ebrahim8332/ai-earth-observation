@@ -154,7 +154,7 @@ def _build_3d_scatter(data: dict, corridor_key: str) -> go.Figure:
     rf_class = data['rf_class']
 
     # Subsample to 10,000 points to stay within Intel integrated GPU memory limits
-    MAX_PTS = 20_000
+    MAX_PTS = 35_000
     if len(x) > MAX_PTS:
         rng = np.random.default_rng(42)
         idx = rng.choice(len(x), MAX_PTS, replace=False)
