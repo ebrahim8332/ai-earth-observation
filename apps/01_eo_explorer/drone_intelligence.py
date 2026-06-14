@@ -569,18 +569,35 @@ def _build_comparison_fig(n_drone_crowns, n_encroaching, PIXEL_M, VH, VW) -> tup
 def _inspection_prompt(zone_stats: dict, flagged_segs: list) -> str:
     lines = [f"{n}: {s['mean_C']}°C (delta-T {s['delta_T']}°C) — {s['class']}"
              for n, s in zone_stats.items()]
-    return f"""You are an electrical utility inspection engineer reviewing UAV thermal inspection results.
-Write a structured inspection report. Use CIGRE delta-T thresholds. Direct and technical. Full depth — do not truncate findings. Use section headings.
+    return f"""You are an Earth observation and thermal inspection analyst producing a structured UAV inspection brief for a utility engineering team.
 
-TOWER: 115 kV transmission tower, Catawba Valley NC corridor. Ambient: {AMBIENT_TEMP}°C.
-[Data is simulated — modelled on real UAV inspection datasets]
+TOWER: 115 kV transmission tower, Catawba Valley NC corridor. Ambient air temperature: {AMBIENT_TEMP}°C.
+[Data is simulated — modelled on real UAV thermal inspection datasets]
 
-COMPONENT THERMAL READINGS:
+LAYER 2 OUTPUTS (computed from co-registered RGB and thermal rasters):
 {chr(10).join(lines)}
 
-Format: Critical findings first, then warnings, then normal components.
-End with: SENSOR NOTE — one sentence on thermal resolution limits vs RGB.
-DATA QUALITY: Component zones: {len(zone_stats)} | Flagged segments: {len(flagged_segs)}"""
+Flagged segments (Warning or Critical): {len(flagged_segs)}
+
+Write a structured five-element inspection brief. Use exactly these five headings.
+
+## 1. Critical Findings
+List every component classified Critical (delta-T > 30°C). State the component name, mean temperature, delta-T, and the specific failure mode most consistent with that thermal signature (e.g. cracked ceramic disc, contaminated surface, loose compression joint). State the required action and urgency for each.
+
+## 2. Warnings
+List every component classified Warning (delta-T 15–30°C). State the component name, delta-T, and the most likely cause. State the recommended inspection timeframe.
+
+## 3. Normal Components
+Briefly confirm which components are within normal range and why no action is required.
+
+## 4. Sensor Capability and Methodology
+Explain what the co-registered thermal + RGB approach provides that a single-sensor inspection cannot. Cover: why delta-T is used instead of absolute temperature, how Isolation Forest detects anomalies without labelled training data, and how SLIC segmentation assigns anomalous pixels to specific components.
+
+## 5. Field Verification Requirements
+State clearly what this thermal analysis cannot confirm without field inspection. Cover: internal component condition vs surface temperature, conductor sag under load, and thermal camera resolution limits relative to the RGB camera.
+
+End with:
+DATA QUALITY: Component zones: {len(zone_stats)} | Flagged segments: {len(flagged_segs)} | Source: simulated data modelled on real UAV inspection datasets"""
 
 
 def _inspection_fallback(zone_stats: dict, flagged_segs: list) -> str:
@@ -615,26 +632,46 @@ def _vegetation_prompt(n_crowns, n_encroaching, pred_counts, PIXEL_M, VH, VW,
         f"  {class_names[c]}: {pred_counts[c]:,} px = {pred_counts[c]*PIXEL_M**2:.0f} m²"
         for c in range(4)
     )
-    return f"""You are a vegetation management engineer reviewing drone survey and LiDAR results for a transmission corridor.
-Write a structured vegetation management brief. Compare drone watershed segmentation to LiDAR DBSCAN. Direct and technical. Full depth — do not truncate findings. Use section headings.
-[Data is simulated — modelled on real corridor survey datasets]
+    return f"""You are an Earth observation and vegetation management analyst producing a structured drone survey brief for a utility corridor management team.
 
-DRONE SURVEY: {VH*VW*PIXEL_M**2:.0f} m² patch of Catawba Valley 115kV corridor at 10 cm/pixel.
+CORRIDOR: Catawba Valley 115kV transmission corridor — same area as Arc 5 LiDAR survey.
+[Data is simulated — modelled on real UAV corridor survey datasets]
+
+LAYER 2 OUTPUTS — DRONE (watershed segmentation + Random Forest, 10 cm/pixel):
+  Survey area: {VH*VW*PIXEL_M**2:.0f} m²
   Watershed crowns detected: {n_crowns}
-  Encroaching crowns (within 1m of clear strip): {n_encroaching}
-  RF classification:
+  Encroaching crowns (within 1 m of clear strip boundary): {n_encroaching}
+  Random Forest pixel classification:
 {class_lines}
 
-ARC 5 LIDAR (same corridor, full extent):
+LAYER 2 OUTPUTS — ARC 5 LIDAR (DBSCAN, same corridor, full extent):
   Coverage: {lidar_stats.get('area_m2', 45000):,} m²
-  DBSCAN crowns: {lidar_stats.get('n_crowns', 102)}
+  DBSCAN crowns detected: {lidar_stats.get('n_crowns', 102)}
   Violating crowns: {lidar_stats.get('n_violating', '—')}
   Violation rate: {lidar_stats.get('viol_pct', '—'):.1f}%
   Mean tree height: {lidar_stats.get('mean_h', '—'):.1f} m
-  Crown density: {lidar_stats.get('density', '—'):.1f} per 1,000 m²
-  Drone density: {lidar_stats.get('drone_density', '—'):.1f} per 1,000 m²
+  LiDAR crown density: {lidar_stats.get('density', '—'):.1f} per 1,000 m²
+  Drone crown density: {lidar_stats.get('drone_density', '—'):.1f} per 1,000 m²
 
-Cover: where they agree, where they diverge and WHY, and how to combine them operationally."""
+Write a structured five-element vegetation management brief. Use exactly these five headings.
+
+## 1. Encroachment Status
+State the number of encroaching crowns and their proximity to the clear strip. Assess the immediate vegetation management risk. Reference the drone crown count and the LiDAR violation rate from the same corridor.
+
+## 2. Land Cover Breakdown
+Interpret the Random Forest classification results. State what each class means for corridor management. Identify which land cover types present a risk and which do not.
+
+## 3. Drone vs LiDAR Comparison
+Explain where the two methods agree and where they diverge. Specifically address why the drone finds higher crown density than LiDAR DBSCAN (different algorithms, not different trees). State what each method measures that the other cannot — height from LiDAR, spectral class and crown texture from drone.
+
+## 4. Algorithm Capability
+Explain what watershed segmentation and Random Forest provide that manual photo interpretation cannot. Cover: how watershed finds crown boundaries without knowing the number of crowns in advance, and how texture features in Random Forest separate tree canopy from smooth grass at 10 cm resolution.
+
+## 5. Recommended Operational Approach
+State how to combine drone and LiDAR in a production vegetation management workflow. Specify which method is appropriate for corridor-wide screening vs targeted follow-up inspection. Include at least one field verification step neither method can replace.
+
+End with:
+DATA QUALITY: Drone crowns: {n_crowns} | Encroaching: {n_encroaching} | LiDAR crowns: {lidar_stats.get('n_crowns', 102)} | Source: simulated data modelled on real corridor survey datasets"""
 
 
 def _vegetation_fallback(n_crowns, n_encroaching, lidar_stats: dict) -> str:
