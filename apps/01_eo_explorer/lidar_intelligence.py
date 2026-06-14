@@ -384,48 +384,61 @@ def _build_priority_df(data: dict, corridor_key: str):
 
 
 def _build_growth_chart(data: dict, corridor_key: str, growth_rate_m: float) -> bytes:
-    """Matplotlib bar chart showing current vs projected crown heights at Year 1/2/3."""
-    tree_h    = data.get('tree_height',    np.array([], dtype=np.float32))
-    tree_viol = data.get('tree_violating', np.array([], dtype=bool))
-    thr = LIDAR_CORRIDORS[corridor_key]['clearance_threshold_m']
-    hw  = LIDAR_CORRIDORS[corridor_key]['corridor_half_width_m']
-    tree_cy = data.get('tree_cy', np.array([], dtype=np.float32))
+    """Bar chart: CHM cells within the clear strip that breach the threshold at Now/Yr1/Yr2/Yr3.
+
+    Uses CHM grid cells instead of DBSCAN tree crowns. A cleared strip contains very few
+    detected tree crowns — most vegetation is low shrubs and regrowth not captured by DBSCAN.
+    The CHM grid has a value for every 1m cell, so it captures all vegetation including
+    the regrowth that will breach the threshold first.
+    """
+    CHM   = data.get('CHM')
+    thr   = LIDAR_CORRIDORS[corridor_key]['clearance_threshold_m']
+    hw    = LIDAR_CORRIDORS[corridor_key]['corridor_half_width_m']
     y_min = float(data['grid_y_min'])
     y_max = float(data['grid_y_max'])
-    line_y = (y_min + y_max) / 2.0
 
-    # Only trees within the clear strip
-    in_strip = np.array([
-        abs(float(tree_cy[i]) - line_y) <= hw
-        for i in range(len(tree_cy))
-    ]) if len(tree_cy) else np.zeros(len(tree_h), dtype=bool)
+    if CHM is None or CHM.size == 0:
+        # Fallback to tree crowns if CHM missing
+        tree_h  = data.get('tree_height', np.array([], dtype=np.float32))
+        n_now = int(data.get('n_violating', 0))
+        yr1 = int(((tree_h + growth_rate_m * 1) > thr).sum()) if len(tree_h) else n_now
+        yr2 = int(((tree_h + growth_rate_m * 2) > thr).sum()) if len(tree_h) else n_now
+        yr3 = int(((tree_h + growth_rate_m * 3) > thr).sum()) if len(tree_h) else n_now
+        values = [n_now, yr1, yr2, yr3]
+        unit = 'trees'
+    else:
+        # Mask CHM to clear strip rows, keep only cells with vegetation (> 0.5m)
+        n_rows, n_cols = CHM.shape
+        y_coords = np.linspace(y_min, y_max, n_rows)
+        line_y   = (y_min + y_max) / 2.0
+        strip_rows = (y_coords >= line_y - hw) & (y_coords <= line_y + hw)
+        chm_strip  = CHM[strip_rows, :]           # rows in the clear strip
+        veg_cells  = chm_strip[chm_strip > 0.5]   # exclude bare ground / no-data
 
-    h_strip    = tree_h[in_strip]   if len(tree_h) else np.array([])
-    viol_strip = tree_viol[in_strip] if len(tree_viol) else np.array([], dtype=bool)
-
-    current_viol  = int(viol_strip.sum()) if len(viol_strip) else 0
-    yr1_viol = int(((h_strip + growth_rate_m * 1) > thr).sum()) if len(h_strip) else 0
-    yr2_viol = int(((h_strip + growth_rate_m * 2) > thr).sum()) if len(h_strip) else 0
-    yr3_viol = int(((h_strip + growth_rate_m * 3) > thr).sum()) if len(h_strip) else 0
+        n_now = int((veg_cells > thr).sum())
+        yr1   = int(((veg_cells + growth_rate_m * 1) > thr).sum())
+        yr2   = int(((veg_cells + growth_rate_m * 2) > thr).sum())
+        yr3   = int(((veg_cells + growth_rate_m * 3) > thr).sum())
+        values = [n_now, yr1, yr2, yr3]
+        unit = 'CHM cells (1 m²)'
 
     labels = ['Now', 'Year 1', 'Year 2', 'Year 3']
-    values = [current_viol, yr1_viol, yr2_viol, yr3_viol]
     colors = ['#C62828', '#E57373', '#EF9A9A', '#FFCDD2']
 
     fig, ax = plt.subplots(figsize=(7, 4))
     bars = ax.bar(labels, values, color=colors, edgecolor='white', linewidth=1.5, width=0.5)
-    ax.axhline(current_viol, color='#C62828', lw=1.0, ls='--', alpha=0.5)
+    ax.axhline(values[0], color='#C62828', lw=1.0, ls='--', alpha=0.5)
 
     max_val = max(values) if max(values) > 0 else 1
     for bar, val in zip(bars, values):
         ax.text(bar.get_x() + bar.get_width() / 2,
                 bar.get_height() + max_val * 0.02,
-                str(val), ha='center', va='bottom', fontweight='bold', fontsize=11)
+                f"{val:,}", ha='center', va='bottom', fontweight='bold', fontsize=11)
 
-    ax.set_ylabel('Trees exceeding clearance threshold', fontsize=9)
+    ax.set_ylabel(f'Strip {unit} exceeding threshold', fontsize=9)
     ax.set_title(
-        f'Violation projection — {corridor_key.split("—")[0].strip()}\n'
-        f'Growth rate: {growth_rate_m} m/year  |  Threshold: {thr} m',
+        f'Vegetation growth projection — {corridor_key.split("—")[0].strip()}\n'
+        f'Growth rate: {growth_rate_m} m/year  |  Clearance threshold: {thr} m',
         fontsize=10, fontweight='bold'
     )
     ax.set_facecolor('#f8f8f8')
@@ -1231,29 +1244,10 @@ UTM zone for this corridor: **{meta.get('utm_zone', 'see corridor metadata')}**.
         st.session_state[growth_chart_key] = _build_growth_chart(data, corridor_key, growth_rate)
     st.image(st.session_state[growth_chart_key], use_container_width=False, width=580)
     st.caption(
-        f"Bars show the number of trees in the clear strip that exceed the "
-        f"{meta['clearance_threshold_m']}m threshold at each point in time, "
-        f"assuming {growth_rate} m/year uniform growth."
+        f"Each bar counts 1m² CHM grid cells inside the clear strip that exceed "
+        f"{meta['clearance_threshold_m']}m, assuming {growth_rate} m/year uniform growth. "
+        f"The CHM includes all vegetation — shrubs and regrowth as well as detected tree crowns."
     )
-
-    # Explain flat result so it doesn't look like a bug
-    _tree_h  = data.get('tree_height', np.array([], dtype=np.float32))
-    _tree_cy = data.get('tree_cy',     np.array([], dtype=np.float32))
-    _line_y  = (float(data['grid_y_min']) + float(data['grid_y_max'])) / 2.0
-    _hw      = meta['corridor_half_width_m']
-    _thr     = meta['clearance_threshold_m']
-    if len(_tree_cy) and len(_tree_h):
-        _in_strip = np.array([abs(float(_tree_cy[i]) - _line_y) <= _hw for i in range(len(_tree_cy))])
-        _h_strip  = _tree_h[_in_strip]
-        _now_count = int(((_h_strip) > _thr).sum())
-        _yr3_count = int(((_h_strip + growth_rate * 3) > _thr).sum())
-        if _yr3_count == _now_count:
-            st.info(
-                f"All four bars are equal at {growth_rate} m/yr. "
-                f"The {_now_count} current violations are already above the threshold. "
-                f"No other strip trees are close enough to {_thr}m to breach within 3 years at this rate. "
-                f"**Try the slider at 1.0–1.5 m/yr** to see new violations emerge."
-            )
 
     with st.expander("What growth rates should I use?", expanded=False):
         st.markdown("""
