@@ -225,7 +225,11 @@ def _build_chm_fig(data: dict, corridor_key: str) -> bytes:
     hw    = LIDAR_CORRIDORS[corridor_key]['corridor_half_width_m']
     line_y = (y_min + y_max) / 2
 
-    violation_map = (CHM > thr).astype(float)
+    # Build a y-coordinate array matching the CHM grid rows
+    n_rows, n_cols = CHM.shape
+    y_coords  = np.linspace(y_min, y_max, n_rows)
+    clear_zone = ((y_coords >= line_y - hw) & (y_coords <= line_y + hw))[:, np.newaxis]
+    violation_map = ((CHM > thr) & clear_zone).astype(float)
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
