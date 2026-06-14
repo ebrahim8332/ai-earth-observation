@@ -40,6 +40,7 @@ import land_cover
 import corridor_risk
 import flood_intelligence
 import lidar_intelligence
+import drone_intelligence
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -75,7 +76,7 @@ with st.sidebar:
     st.markdown("### Module")
     selected_module = st.radio(
         "Navigate",
-        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer", "🌫️ Emissions Explorer", "🌿 Land Cover Intelligence", "⚠️ Corridor Risk Intelligence", "🌊 Flood Intelligence", "🌲 LiDAR Clearance Intelligence"],
+        ["🏠 Welcome", "🔬 Spectral Explorer", "📈 Time Series Explorer", "🔀 Change Detection", "🔍 AI Imagery Interpreter", "📡 SAR Explorer", "🌫️ Emissions Explorer", "🌿 Land Cover Intelligence", "⚠️ Corridor Risk Intelligence", "🌊 Flood Intelligence", "🌲 LiDAR Clearance Intelligence", "🚁 Drone Intelligence"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -4211,6 +4212,10 @@ if selected_module == "🌊 Flood Intelligence":
 
 if selected_module == "🌲 LiDAR Clearance Intelligence":
     lidar_intelligence.render()
+    st.stop()
+
+if selected_module == "🚁 Drone Intelligence":
+    drone_intelligence.render()
     st.stop()
 
 # ---------------------------------------------------------------------------
