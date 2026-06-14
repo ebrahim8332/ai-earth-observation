@@ -153,6 +153,14 @@ def _build_3d_scatter(data: dict, corridor_key: str) -> go.Figure:
     z = data['z']
     rf_class = data['rf_class']
 
+    # Subsample to 10,000 points to stay within Intel integrated GPU memory limits
+    MAX_PTS = 10_000
+    if len(x) > MAX_PTS:
+        rng = np.random.default_rng(42)
+        idx = rng.choice(len(x), MAX_PTS, replace=False)
+        idx.sort()
+        x, y, z, rf_class = x[idx], y[idx], z[idx], rf_class[idx]
+
     # Mark violating tree crowns bright red
     violating = data.get('tree_violating', np.array([], dtype=bool))
     tree_cx   = data.get('tree_cx', np.array([], dtype=np.float32))
