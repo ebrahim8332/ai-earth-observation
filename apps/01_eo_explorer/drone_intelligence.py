@@ -570,7 +570,7 @@ def _inspection_prompt(zone_stats: dict, flagged_segs: list) -> str:
     lines = [f"{n}: {s['mean_C']}°C (delta-T {s['delta_T']}°C) — {s['class']}"
              for n, s in zone_stats.items()]
     return f"""You are an electrical utility inspection engineer reviewing UAV thermal inspection results.
-Write a brief structured inspection report. Use CIGRE delta-T thresholds. Direct and technical. Under 280 words.
+Write a structured inspection report. Use CIGRE delta-T thresholds. Direct and technical. Full depth — do not truncate findings. Use section headings.
 
 TOWER: 115 kV transmission tower, Catawba Valley NC corridor. Ambient: {AMBIENT_TEMP}°C.
 [Data is simulated — modelled on real UAV inspection datasets]
@@ -616,7 +616,7 @@ def _vegetation_prompt(n_crowns, n_encroaching, pred_counts, PIXEL_M, VH, VW,
         for c in range(4)
     )
     return f"""You are a vegetation management engineer reviewing drone survey and LiDAR results for a transmission corridor.
-Write a brief comparing drone watershed segmentation to LiDAR DBSCAN. Under 280 words. Direct and technical.
+Write a structured vegetation management brief. Compare drone watershed segmentation to LiDAR DBSCAN. Direct and technical. Full depth — do not truncate findings. Use section headings.
 [Data is simulated — modelled on real corridor survey datasets]
 
 DRONE SURVEY: {VH*VW*PIXEL_M**2:.0f} m² patch of Catawba Valley 115kV corridor at 10 cm/pixel.
@@ -1204,27 +1204,28 @@ the statistical anomaly. The algorithm (Layer 2) finds; the AI (Layer 3) explain
                 st.divider()
                 col1, col2 = st.columns(2)
                 with col1:
-                    word_bytes = _build_word_inspection(
-                        zone_stats, brief_text, model_used,
-                        rgb_th_bytes, iso_bytes, seg_bytes
-                    )
-                    st.download_button(
-                        "⬇ Download Word Report (.docx)",
-                        data=word_bytes,
-                        file_name="drone_inspection_brief.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        type="primary"
-                    )
-                with col2:
                     md_text = f"# Drone Infrastructure Inspection Brief\n\n" \
                               f"**Corridor:** Catawba Valley NC — 115kV  \n" \
                               f"**Simulated data** — modelled on real UAV inspection datasets\n\n" \
                               f"---\n\n{brief_text}"
                     st.download_button(
-                        "⬇ Download Markdown (.md)",
+                        "⬇ Download brief (.md)",
                         data=md_text,
                         file_name="drone_inspection_brief.md",
-                        mime="text/markdown"
+                        mime="text/markdown",
+                        use_container_width=True,
+                    )
+                with col2:
+                    word_bytes = _build_word_inspection(
+                        zone_stats, brief_text, model_used,
+                        rgb_th_bytes, iso_bytes, seg_bytes
+                    )
+                    st.download_button(
+                        "⬇ Download brief (.docx)",
+                        data=word_bytes,
+                        file_name="drone_inspection_brief.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
                     )
 
     # ==========================================================================
@@ -1479,26 +1480,27 @@ The algorithm finds; the AI explains.
                 st.divider()
                 col1, col2 = st.columns(2)
                 with col1:
+                    md_text = f"# Drone Vegetation Mapping Brief\n\n" \
+                              f"**Corridor:** Catawba Valley NC — 115kV  \n" \
+                              f"**Simulated data** — modelled on real corridor survey datasets\n\n" \
+                              f"---\n\n{brief_text}"
+                    st.download_button(
+                        "⬇ Download brief (.md)",
+                        data=md_text,
+                        file_name="drone_vegetation_brief.md",
+                        mime="text/markdown",
+                        use_container_width=True,
+                    )
+                with col2:
                     word_bytes = _build_word_vegetation(
                         pred_counts, n_crowns, n_encroach, accuracy,
                         brief_text, model_used, PIXEL_M, VH, VW, lidar_stats,
                         ndvi_bytes, ws_bytes, rf_bytes, comp_bytes
                     )
                     st.download_button(
-                        "⬇ Download Word Report (.docx)",
+                        "⬇ Download brief (.docx)",
                         data=word_bytes,
                         file_name="drone_vegetation_brief.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        type="primary"
-                    )
-                with col2:
-                    md_text = f"# Drone Vegetation Mapping Brief\n\n" \
-                              f"**Corridor:** Catawba Valley NC — 115kV  \n" \
-                              f"**Simulated data** — modelled on real corridor survey datasets\n\n" \
-                              f"---\n\n{brief_text}"
-                    st.download_button(
-                        "⬇ Download Markdown (.md)",
-                        data=md_text,
-                        file_name="drone_vegetation_brief.md",
-                        mime="text/markdown"
+                        use_container_width=True,
                     )
