@@ -706,7 +706,8 @@ across hundreds of kilometres of corridor at sub-metre accuracy.
     st.caption("🔵 **Simulated corridor data** — representative of USGS 3DEP QL2 point density and structure. See notebook 09_lidar_intelligence.ipynb for the live API workflow.")
 
     fig_3d = _build_3d_scatter(data, corridor_key)
-    st.plotly_chart(fig_3d, use_container_width=True, on_select="ignore")
+    html_3d = fig_3d.to_html(full_html=True, include_plotlyjs="cdn")
+    st.components.v1.html(html_3d, height=620, scrolling=False)
 
     with st.expander("ℹ️ How to read the 3D point cloud", expanded=False):
         st.markdown("""
