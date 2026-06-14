@@ -412,8 +412,11 @@ def _build_growth_chart(data: dict, corridor_key: str, growth_rate_m: float) -> 
         y_coords = np.linspace(y_min, y_max, n_rows)
         line_y   = (y_min + y_max) / 2.0
         strip_rows = (y_coords >= line_y - hw) & (y_coords <= line_y + hw)
-        chm_strip  = CHM[strip_rows, :]           # rows in the clear strip
-        veg_cells  = chm_strip[chm_strip > 0.5]   # exclude bare ground / no-data
+        chm_strip  = CHM[strip_rows, :]             # rows in the clear strip
+        # Only established vegetation (>= 1.5m). Ground cover and early regrowth (<1.5m)
+        # cannot realistically sustain the growth rates shown — excluding them keeps
+        # the projection grounded in actual woody vegetation.
+        veg_cells  = chm_strip[chm_strip >= 1.5]
 
         n_now = int((veg_cells > thr).sum())
         yr1   = int(((veg_cells + growth_rate_m * 1) > thr).sum())
@@ -1244,9 +1247,9 @@ UTM zone for this corridor: **{meta.get('utm_zone', 'see corridor metadata')}**.
         st.session_state[growth_chart_key] = _build_growth_chart(data, corridor_key, growth_rate)
     st.image(st.session_state[growth_chart_key], use_container_width=False, width=580)
     st.caption(
-        f"Each bar counts 1m² CHM grid cells inside the clear strip that exceed "
-        f"{meta['clearance_threshold_m']}m, assuming {growth_rate} m/year uniform growth. "
-        f"The CHM includes all vegetation — shrubs and regrowth as well as detected tree crowns."
+        f"Counts 1m² CHM cells inside the clear strip with established vegetation (≥1.5m) "
+        f"that exceed {meta['clearance_threshold_m']}m, assuming {growth_rate} m/year uniform growth. "
+        f"Ground cover below 1.5m is excluded — it cannot sustain these growth rates."
     )
 
     with st.expander("What growth rates should I use?", expanded=False):
@@ -1265,9 +1268,11 @@ Growth rate varies by species, soil, rainfall, and competition.
 Heights are underestimated by 0.3–0.8m compared to full leaf-on conditions.
 The amber zone (80% of threshold) already provides a buffer for this.
 
-**What this projection cannot do:** it assumes every tree grows at the same rate.
-In practice, a field crew records species at each violation site. That data feeds
-a per-species growth model in the next survey cycle.
+**What this projection cannot do:** it assumes uniform growth across all established
+vegetation in the strip. In reality, a mature oak grows slower than a young poplar.
+The projection shows the upper bound — a useful planning signal, not a precise forecast.
+A field crew records species at each violation site. That data feeds a per-species
+growth model in the next survey cycle, replacing this uniform assumption.
         """)
 
     # ------------------------------------------------------------------
