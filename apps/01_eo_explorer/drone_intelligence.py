@@ -41,8 +41,7 @@ import matplotlib.patches as mpatches
 from matplotlib.colors import ListedColormap
 from scipy.ndimage import gaussian_filter, distance_transform_edt, uniform_filter
 from scipy.signal import find_peaks
-from skimage.segmentation import slic, mark_boundaries
-from skimage.morphology import watershed
+from skimage.segmentation import slic, mark_boundaries, watershed
 from skimage.feature import peak_local_max
 from skimage.filters import gaussian as sk_gaussian
 from skimage.measure import regionprops
