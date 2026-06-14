@@ -1056,7 +1056,7 @@ A component at 58°C in 24°C air has delta-T = 34°C — that is the fault indi
                      "CRITICAL": "background-color:#f8d7da; font-weight:bold"}.get(val, "")
                 return c
             st.dataframe(
-                df_zones.style.applymap(_colour_class, subset=["CIGRE Class"]),
+                df_zones.style.map(_colour_class, subset=["CIGRE Class"]),
                 use_container_width=True, hide_index=True
             )
 
@@ -1115,7 +1115,7 @@ so you can answer: *this anomalous cluster is inside the top-right insulator.*
                  "CIGRE Class": zone_stats[n]["class"]}
                 for n, v in zone_anomaly.items()
             ])
-            st.dataframe(df_anom.style.applymap(_colour_class, subset=["CIGRE Class"]),
+            st.dataframe(df_anom.style.map(_colour_class, subset=["CIGRE Class"]),
                          use_container_width=True, hide_index=True)
 
             # ── Layer 2: Segmentation ─────────────────────────────────────────
@@ -1150,7 +1150,7 @@ and severity class — not raw pixels. Generative AI interprets structure, not i
                 st.markdown("**Flagged segments (Warning or Critical):**")
                 df_flag = pd.DataFrame(flagged_segs)[["class", "mean_C", "delta_T"]]
                 df_flag.columns = ["Class", "Mean Temp (°C)", "Delta-T (°C)"]
-                st.dataframe(df_flag.style.applymap(_colour_class, subset=["Class"]),
+                st.dataframe(df_flag.style.map(_colour_class, subset=["Class"]),
                              use_container_width=True, hide_index=True)
 
             # ── Layer 3: AI brief ─────────────────────────────────────────────
