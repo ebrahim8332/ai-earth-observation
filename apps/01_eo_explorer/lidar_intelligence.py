@@ -384,64 +384,64 @@ def _build_priority_df(data: dict, corridor_key: str):
 
 
 def _build_growth_chart(data: dict, corridor_key: str, growth_rate_m: float) -> bytes:
-    """Bar chart: CHM cells within the clear strip that breach the threshold at Now/Yr1/Yr2/Yr3.
+    """Grouped bar chart showing how far violation trees will be above threshold if untreated.
 
-    Uses CHM grid cells instead of DBSCAN tree crowns. A cleared strip contains very few
-    detected tree crowns — most vegetation is low shrubs and regrowth not captured by DBSCAN.
-    The CHM grid has a value for every 1m cell, so it captures all vegetation including
-    the regrowth that will breach the threshold first.
+    Uses confirmed DBSCAN violation trees only. These are trees already above the clearance
+    threshold — the ones that will definitely require trimming. The chart shows:
+      - Average height above threshold now and at Year 1/2/3
+      - Number of violation trees (count stays the same — the same trees just grow taller)
+
+    This is operationally useful: it tells crews how much trimming margin will be needed
+    and how urgently treatment is required.
     """
-    CHM   = data.get('CHM')
-    thr   = LIDAR_CORRIDORS[corridor_key]['clearance_threshold_m']
-    hw    = LIDAR_CORRIDORS[corridor_key]['corridor_half_width_m']
-    y_min = float(data['grid_y_min'])
-    y_max = float(data['grid_y_max'])
+    tree_h    = data.get('tree_height',    np.array([], dtype=np.float32))
+    tree_viol = data.get('tree_violating', np.array([], dtype=bool))
+    tree_cy   = data.get('tree_cy',        np.array([], dtype=np.float32))
+    thr = LIDAR_CORRIDORS[corridor_key]['clearance_threshold_m']
+    hw  = LIDAR_CORRIDORS[corridor_key]['corridor_half_width_m']
+    y_min  = float(data['grid_y_min'])
+    y_max  = float(data['grid_y_max'])
+    line_y = (y_min + y_max) / 2.0
 
-    if CHM is None or CHM.size == 0:
-        # Fallback to tree crowns if CHM missing
-        tree_h  = data.get('tree_height', np.array([], dtype=np.float32))
-        n_now = int(data.get('n_violating', 0))
-        yr1 = int(((tree_h + growth_rate_m * 1) > thr).sum()) if len(tree_h) else n_now
-        yr2 = int(((tree_h + growth_rate_m * 2) > thr).sum()) if len(tree_h) else n_now
-        yr3 = int(((tree_h + growth_rate_m * 3) > thr).sum()) if len(tree_h) else n_now
-        values = [n_now, yr1, yr2, yr3]
-        unit = 'trees'
-    else:
-        # Mask CHM to clear strip rows, keep only cells with vegetation (> 0.5m)
-        n_rows, n_cols = CHM.shape
-        y_coords = np.linspace(y_min, y_max, n_rows)
-        line_y   = (y_min + y_max) / 2.0
-        strip_rows = (y_coords >= line_y - hw) & (y_coords <= line_y + hw)
-        chm_strip  = CHM[strip_rows, :]             # rows in the clear strip
-        # Only established vegetation (>= 1.5m). Ground cover and early regrowth (<1.5m)
-        # cannot realistically sustain the growth rates shown — excluding them keeps
-        # the projection grounded in actual woody vegetation.
-        veg_cells  = chm_strip[chm_strip >= 1.5]
+    # Get violation trees within the clear strip
+    viol_heights = []
+    for i in range(len(tree_h)):
+        is_viol = bool(tree_viol[i]) if i < len(tree_viol) else False
+        cy      = float(tree_cy[i])  if i < len(tree_cy)   else line_y
+        if is_viol and abs(cy - line_y) <= hw:
+            viol_heights.append(float(tree_h[i]))
 
-        n_now = int((veg_cells > thr).sum())
-        yr1   = int(((veg_cells + growth_rate_m * 1) > thr).sum())
-        yr2   = int(((veg_cells + growth_rate_m * 2) > thr).sum())
-        yr3   = int(((veg_cells + growth_rate_m * 3) > thr).sum())
-        values = [n_now, yr1, yr2, yr3]
-        unit = 'CHM cells (1 m²)'
+    if not viol_heights:
+        # No in-strip violations — use all violations
+        viol_heights = [float(h) for h, v in zip(tree_h, tree_viol) if v]
+
+    viol_heights = np.array(viol_heights) if viol_heights else np.array([thr + 0.5])
+    n_viol = len(viol_heights)
+
+    # Average metres above threshold at each time point
+    excess_now = float(np.mean(viol_heights - thr))
+    excess_yr1 = float(np.mean(viol_heights + growth_rate_m * 1 - thr))
+    excess_yr2 = float(np.mean(viol_heights + growth_rate_m * 2 - thr))
+    excess_yr3 = float(np.mean(viol_heights + growth_rate_m * 3 - thr))
 
     labels = ['Now', 'Year 1', 'Year 2', 'Year 3']
+    values = [excess_now, excess_yr1, excess_yr2, excess_yr3]
     colors = ['#C62828', '#E57373', '#EF9A9A', '#FFCDD2']
 
     fig, ax = plt.subplots(figsize=(7, 4))
     bars = ax.bar(labels, values, color=colors, edgecolor='white', linewidth=1.5, width=0.5)
-    ax.axhline(values[0], color='#C62828', lw=1.0, ls='--', alpha=0.5)
 
-    max_val = max(values) if max(values) > 0 else 1
+    max_val = max(values) if max(values) > 0 else 1.0
     for bar, val in zip(bars, values):
         ax.text(bar.get_x() + bar.get_width() / 2,
                 bar.get_height() + max_val * 0.02,
-                f"{val:,}", ha='center', va='bottom', fontweight='bold', fontsize=11)
+                f"+{val:.1f} m", ha='center', va='bottom', fontweight='bold', fontsize=11)
 
-    ax.set_ylabel(f'Strip {unit} exceeding threshold', fontsize=9)
+    ax.set_ylabel('Average metres above clearance threshold', fontsize=9)
     ax.set_title(
-        f'Vegetation growth projection — {corridor_key.split("—")[0].strip()}\n'
-        f'Growth rate: {growth_rate_m} m/year  |  Clearance threshold: {thr} m',
+        f'If violations are untreated — {corridor_key.split("—")[0].strip()}\n'
+        f'{n_viol} violation tree{"s" if n_viol != 1 else ""}  |  '
+        f'Growth rate: {growth_rate_m} m/yr  |  Threshold: {thr} m',
         fontsize=10, fontweight='bold'
     )
     ax.set_facecolor('#f8f8f8')
@@ -1231,9 +1231,9 @@ UTM zone for this corridor: **{meta.get('utm_zone', 'see corridor metadata')}**.
     section_break()
     st.subheader("📈 Vegetation Growth Projection")
     st.caption(
-        "How many trees will breach the clearance threshold if left untreated? "
-        "Adjust the growth rate slider to match species and region. "
-        "Only trees currently within the clear strip are counted."
+        "If current violations are left untreated, how much further above the threshold "
+        "will they grow? Each bar shows the average excess height of confirmed violation trees. "
+        "This is the trimming margin a crew will need at each point in time."
     )
 
     growth_rate = st.slider(
@@ -1247,9 +1247,10 @@ UTM zone for this corridor: **{meta.get('utm_zone', 'see corridor metadata')}**.
         st.session_state[growth_chart_key] = _build_growth_chart(data, corridor_key, growth_rate)
     st.image(st.session_state[growth_chart_key], use_container_width=False, width=580)
     st.caption(
-        f"Counts 1m² CHM cells inside the clear strip with established vegetation (≥1.5m) "
-        f"that exceed {meta['clearance_threshold_m']}m, assuming {growth_rate} m/year uniform growth. "
-        f"Ground cover below 1.5m is excluded — it cannot sustain these growth rates."
+        f"Bars show average metres above the {meta['clearance_threshold_m']}m threshold "
+        f"for the {int(data.get('n_violating', 0))} confirmed violation trees, "
+        f"assuming {growth_rate} m/year uniform growth. "
+        f"The number of violation trees stays the same — they just grow further into the danger zone."
     )
 
     with st.expander("What growth rates should I use?", expanded=False):
