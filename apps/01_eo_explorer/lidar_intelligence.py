@@ -47,6 +47,7 @@ LIDAR_CORRIDORS = {
         "voltage_kv":            115,
         "clearance_threshold_m": 4.5,
         "corridor_half_width_m": 15,
+        "utm_zone":              "17N",
         "terrain":               "Rolling mixed deciduous/conifer forest, Piedmont transition zone",
         "context": (
             "115kV single-circuit wood-pole line, Lincoln County NC. "
@@ -67,6 +68,7 @@ LIDAR_CORRIDORS = {
         "voltage_kv":            500,
         "clearance_threshold_m": 6.1,
         "corridor_half_width_m": 30,
+        "utm_zone":              "10N",
         "terrain":               "Dense Douglas fir and Western hemlock, Cascade Range foothills",
         "context": (
             "500kV Bonneville Power Administration line, Skamania County WA. "
@@ -86,6 +88,7 @@ LIDAR_CORRIDORS = {
         "voltage_kv":            161,
         "clearance_threshold_m": 5.0,
         "corridor_half_width_m": 20,
+        "utm_zone":              "16N",
         "terrain":               "Deciduous hardwood forest, sandstone plateau terrain",
         "context": (
             "161kV Tennessee Valley Authority line, Fentress County TN. "
@@ -317,6 +320,122 @@ def _build_clearance_chart(data: dict, corridor_key: str) -> bytes:
     ax.spines['right'].set_visible(False)
     plt.tight_layout()
     return _fig_to_bytes(fig)
+
+def _build_priority_df(data: dict, corridor_key: str):
+    """Build a priority-ranked inspection DataFrame for all violation and amber crowns."""
+    import pandas as pd
+
+    tree_cx   = data.get('tree_cx',        np.array([], dtype=np.float32))
+    tree_cy   = data.get('tree_cy',        np.array([], dtype=np.float32))
+    tree_r    = data.get('tree_radius',    np.array([], dtype=np.float32))
+    tree_h    = data.get('tree_height',    np.array([], dtype=np.float32))
+    tree_viol = data.get('tree_violating', np.array([], dtype=bool))
+    thr = LIDAR_CORRIDORS[corridor_key]['clearance_threshold_m']
+    hw  = LIDAR_CORRIDORS[corridor_key]['corridor_half_width_m']
+    utm_zone = LIDAR_CORRIDORS[corridor_key].get('utm_zone', 'see corridor metadata')
+
+    y_min = float(data['grid_y_min'])
+    y_max = float(data['grid_y_max'])
+    line_y = (y_min + y_max) / 2.0
+
+    rows = []
+    for i in range(len(tree_cx)):
+        h       = float(tree_h[i])   if len(tree_h) > i   else 0.0
+        r       = float(tree_r[i])   if len(tree_r) > i   else 2.0
+        is_viol = bool(tree_viol[i]) if len(tree_viol) > i else False
+        cx      = float(tree_cx[i])  if len(tree_cx) > i  else 0.0
+        cy      = float(tree_cy[i])  if len(tree_cy) > i  else 0.0
+
+        is_amber = (not is_viol) and (h > thr * 0.8)
+        if not is_viol and not is_amber:
+            continue
+
+        dist_from_centre = abs(cy - line_y)
+        above_thr = h - thr
+
+        # Priority score: higher = inspect sooner
+        # Weights: height ratio (dominant), crown size, proximity to centre
+        height_factor    = h / thr
+        size_factor      = 1.0 + (r / 15.0)
+        proximity_factor = 1.0 + max(0.0, (hw - dist_from_centre) / hw) * 0.3
+        score = height_factor * size_factor * proximity_factor
+        if is_amber:
+            score *= 0.6   # amber is lower urgency than confirmed violations
+
+        rows.append({
+            'Status':            'VIOLATION' if is_viol else 'AMBER',
+            'Height_m':          round(h, 1),
+            'Threshold_m':       thr,
+            'Above_threshold_m': round(above_thr, 2),
+            'Crown_radius_m':    round(r, 1),
+            'Dist_from_centre_m': round(dist_from_centre, 1),
+            'Priority_score':    round(score, 3),
+            'X_UTM':             round(cx, 1),
+            'Y_UTM':             round(cy, 1),
+            'UTM_zone':          utm_zone,
+        })
+
+    df = pd.DataFrame(rows)
+    if len(df):
+        df = df.sort_values('Priority_score', ascending=False).reset_index(drop=True)
+        df.index = df.index + 1
+        df.index.name = 'Rank'
+    return df
+
+
+def _build_growth_chart(data: dict, corridor_key: str, growth_rate_m: float) -> bytes:
+    """Matplotlib bar chart showing current vs projected crown heights at Year 1/2/3."""
+    tree_h    = data.get('tree_height',    np.array([], dtype=np.float32))
+    tree_viol = data.get('tree_violating', np.array([], dtype=bool))
+    thr = LIDAR_CORRIDORS[corridor_key]['clearance_threshold_m']
+    hw  = LIDAR_CORRIDORS[corridor_key]['corridor_half_width_m']
+    tree_cy = data.get('tree_cy', np.array([], dtype=np.float32))
+    y_min = float(data['grid_y_min'])
+    y_max = float(data['grid_y_max'])
+    line_y = (y_min + y_max) / 2.0
+
+    # Only trees within the clear strip
+    in_strip = np.array([
+        abs(float(tree_cy[i]) - line_y) <= hw
+        for i in range(len(tree_cy))
+    ]) if len(tree_cy) else np.zeros(len(tree_h), dtype=bool)
+
+    h_strip    = tree_h[in_strip]   if len(tree_h) else np.array([])
+    viol_strip = tree_viol[in_strip] if len(tree_viol) else np.array([], dtype=bool)
+
+    current_viol  = int(viol_strip.sum()) if len(viol_strip) else 0
+    yr1_viol = int(((h_strip + growth_rate_m * 1) > thr).sum()) if len(h_strip) else 0
+    yr2_viol = int(((h_strip + growth_rate_m * 2) > thr).sum()) if len(h_strip) else 0
+    yr3_viol = int(((h_strip + growth_rate_m * 3) > thr).sum()) if len(h_strip) else 0
+
+    labels = ['Now', 'Year 1', 'Year 2', 'Year 3']
+    values = [current_viol, yr1_viol, yr2_viol, yr3_viol]
+    colors = ['#C62828', '#E57373', '#EF9A9A', '#FFCDD2']
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    bars = ax.bar(labels, values, color=colors, edgecolor='white', linewidth=1.5, width=0.5)
+    ax.axhline(current_viol, color='#C62828', lw=1.0, ls='--', alpha=0.5)
+
+    max_val = max(values) if max(values) > 0 else 1
+    for bar, val in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + max_val * 0.02,
+                str(val), ha='center', va='bottom', fontweight='bold', fontsize=11)
+
+    ax.set_ylabel('Trees exceeding clearance threshold', fontsize=9)
+    ax.set_title(
+        f'Violation projection — {corridor_key.split("—")[0].strip()}\n'
+        f'Growth rate: {growth_rate_m} m/year  |  Threshold: {thr} m',
+        fontsize=10, fontweight='bold'
+    )
+    ax.set_facecolor('#f8f8f8')
+    fig.patch.set_facecolor('white')
+    ax.grid(axis='y', alpha=0.3)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    plt.tight_layout()
+    return _fig_to_bytes(fig)
+
 
 def _build_corridor_map(data: dict, corridor_key: str) -> bytes:
     """Top-down corridor map: DBSCAN tree crowns as circles coloured by clearance status."""
@@ -917,6 +1036,31 @@ The full point cloud may contain several million points. The portal displays ~50
 for smooth browser rendering. The analysis used the full dataset.
         """)
 
+    with st.expander("🗓️ When do utilities fly LiDAR — and why does season matter?", expanded=False):
+        st.markdown("""
+Timing the LiDAR flight is an operational decision. The choice of season changes what the
+point cloud can and cannot see.
+
+| Season | Canopy state | Ground penetration | Best for |
+|--------|-------------|-------------------|----------|
+| **Winter (leaf-off)** | Bare deciduous trees | Excellent — pulses reach ground through bare branches | DTM accuracy, root-zone proximity, structural assessment |
+| **Late spring (full leaf)** | Dense green canopy | Poor — most pulses absorbed by canopy | Maximum crown height, worst-case clearance measurement |
+| **Summer** | Full leaf, dry conditions | Poor | High-risk period coincides with growth peak and dry-weather sag |
+| **Early fall** | Pre-senescence, still leafy | Moderate | Balances height measurement with some ground return |
+
+**The utility practice:**
+
+Most North American transmission operators fly **leaf-off** in the northeast and midwest
+(November to March) for DTM accuracy. They fly **leaf-on** in the southeast (May to August)
+to capture maximum canopy height — the worst-case clearance condition.
+
+Some operators fly twice per year: leaf-off for structural analysis, leaf-on for clearance.
+The two CHMs compared give a direct measure of seasonal height change.
+
+**The Cumberland Plateau corridor in this module** was collected leaf-off. Crown heights
+are lower than leaf-on values. This is normal — annotated on the module header.
+        """)
+
     # ------------------------------------------------------------------
     # CHM
     # ------------------------------------------------------------------
@@ -1020,6 +1164,100 @@ step that turns a one-time survey into a predictive maintenance programme.
         """)
 
     # ------------------------------------------------------------------
+    # Priority inspection table
+    # ------------------------------------------------------------------
+    section_break()
+    st.subheader("🔴 Priority Inspection Table")
+    st.caption(
+        "Violation and amber crowns ranked by urgency. "
+        "Height ratio drives the score. Crown size and proximity to the corridor centre add weight. "
+        "Amber crowns (80–100% of threshold) score lower than confirmed violations."
+    )
+    priority_df = _build_priority_df(data, corridor_key)
+    if len(priority_df):
+        import pandas as pd
+        st.dataframe(priority_df, use_container_width=True)
+
+        csv_priority = priority_df.to_csv().encode('utf-8')
+        safe_name_p = corridor_key[:30].replace(' ', '_').replace(',', '').replace('—', '')
+        st.download_button(
+            label="⬇ Download inspection table (.csv)",
+            data=csv_priority,
+            file_name=f"priority-inspection-{safe_name_p}.csv",
+            mime="text/csv",
+            use_container_width=False,
+        )
+
+        with st.expander("How is the priority score calculated?", expanded=False):
+            st.markdown(f"""
+Each tree in the violation or amber zone receives a **priority score** based on three factors:
+
+| Factor | Formula | Rationale |
+|--------|---------|-----------|
+| **Height ratio** | `height / threshold` | A tree at 2× threshold is twice as urgent as one barely over |
+| **Crown size** | `1 + (crown_radius / 15)` | A wider crown is harder to trim and more likely to touch the conductor |
+| **Centre proximity** | `1 + max(0, (half_width - dist_from_centre) / half_width) × 0.3` | Trees directly under the line are at most risk |
+
+Final score = height_ratio × size_factor × proximity_factor.
+Amber crowns (80–100% of {meta['clearance_threshold_m']}m threshold) receive a ×0.6 multiplier —
+they are flagged for monitoring, not immediate treatment.
+
+**UTM coordinates** (X_UTM, Y_UTM) are the field GPS waypoints for each tree crown centroid.
+These can be loaded directly into handheld GPS units or work order systems.
+UTM zone for this corridor: **{meta.get('utm_zone', 'see corridor metadata')}**.
+            """)
+    else:
+        st.info("No violation or amber crowns detected in this corridor.")
+
+    # ------------------------------------------------------------------
+    # Growth rate projection
+    # ------------------------------------------------------------------
+    section_break()
+    st.subheader("📈 Vegetation Growth Projection")
+    st.caption(
+        "How many trees will breach the clearance threshold if left untreated? "
+        "Adjust the growth rate slider to match species and region. "
+        "Only trees currently within the clear strip are counted."
+    )
+
+    growth_rate = st.slider(
+        "Assumed annual growth rate (m/year)",
+        min_value=0.1, max_value=1.5, value=0.5, step=0.1,
+        key="li_growth_rate",
+        help="Typical range: 0.3 m/yr for slow hardwoods, 0.8–1.5 m/yr for fast-growing poplars or pines."
+    )
+    growth_chart_key = cache_key + f"_growth_{growth_rate}"
+    if growth_chart_key not in st.session_state:
+        st.session_state[growth_chart_key] = _build_growth_chart(data, corridor_key, growth_rate)
+    st.image(st.session_state[growth_chart_key], use_container_width=False, width=580)
+    st.caption(
+        f"Bars show the number of trees in the clear strip that exceed the "
+        f"{meta['clearance_threshold_m']}m threshold at each point in time, "
+        f"assuming {growth_rate} m/year uniform growth."
+    )
+
+    with st.expander("What growth rates should I use?", expanded=False):
+        st.markdown("""
+Growth rate varies by species, soil, rainfall, and competition.
+
+| Species group | Typical annual growth |
+|---------------|----------------------|
+| Slow hardwoods (oak, hickory) | 0.2–0.4 m/yr |
+| Mixed deciduous (maple, tulip poplar) | 0.4–0.7 m/yr |
+| Fast deciduous (cottonwood, silver maple) | 0.8–1.2 m/yr |
+| Fast conifers (loblolly pine, Douglas fir) | 0.6–1.0 m/yr |
+| Invasive species (tree of heaven, kudzu vine) | 1.0–1.5 m/yr |
+
+**Practical guidance:** Use the lower end if you collected at leaf-off (winter).
+Heights are underestimated by 0.3–0.8m compared to full leaf-on conditions.
+The amber zone (80% of threshold) already provides a buffer for this.
+
+**What this projection cannot do:** it assumes every tree grows at the same rate.
+In practice, a field crew records species at each violation site. That data feeds
+a per-species growth model in the next survey cycle.
+        """)
+
+    # ------------------------------------------------------------------
     # Layer 3: AI brief
     # ------------------------------------------------------------------
     section_break()
@@ -1068,9 +1306,10 @@ step that turns a one-time survey into a predictive maintenance programme.
         st.markdown("### Downloads")
         dl1, dl2 = st.columns(2)
 
+        safe_name = corridor_key[:30].replace(' ', '_').replace(',', '').replace('—', '')
+
         with dl1:
             md_content = _build_markdown(data, brief_text, model_used or "built-in fallback", corridor_key)
-            safe_name  = corridor_key[:30].replace(' ', '_').replace(',', '').replace('—', '')
             st.download_button(
                 label="⬇ Download brief (.md)",
                 data=md_content.encode('utf-8'),
@@ -1092,4 +1331,22 @@ step that turns a one-time survey into a predictive maintenance programme.
                 file_name=f"lidar-clearance-{safe_name}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True,
+            )
+
+        # GPS work order CSV — all violation and amber crowns with coordinates
+        import pandas as pd
+        wo_df = _build_priority_df(data, corridor_key)
+        if len(wo_df):
+            wo_df_export = wo_df.reset_index().rename(columns={'Rank': 'Work_order_rank'})
+            wo_df_export.insert(0, 'Corridor', corridor_key)
+            wo_df_export.insert(1, 'Voltage_kV', meta['voltage_kv'])
+            wo_df_export.insert(2, 'Threshold_m', meta['clearance_threshold_m'])
+            wo_csv = wo_df_export.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="⬇ Download GPS work order (.csv)",
+                data=wo_csv,
+                file_name=f"work-order-{safe_name}.csv",
+                mime="text/csv",
+                use_container_width=False,
+                help="GPS-tagged work order for field crews. Load X_UTM / Y_UTM directly into a GPS unit or work order system.",
             )
