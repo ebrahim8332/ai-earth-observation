@@ -154,7 +154,7 @@ def _build_3d_scatter(data: dict, corridor_key: str) -> go.Figure:
     rf_class = data['rf_class']
 
     # Subsample to 10,000 points to stay within Intel integrated GPU memory limits
-    MAX_PTS = 50_000
+    MAX_PTS = 50_000  # Intel integrated GPU limit — do not raise above 75k
     if len(x) > MAX_PTS:
         rng = np.random.default_rng(42)
         idx = rng.choice(len(x), MAX_PTS, replace=False)
@@ -313,6 +313,91 @@ def _build_clearance_chart(data: dict, corridor_key: str) -> bytes:
     plt.tight_layout()
     return _fig_to_bytes(fig)
 
+def _build_corridor_map(data: dict, corridor_key: str) -> bytes:
+    """Top-down corridor map: DBSCAN tree crowns as circles coloured by clearance status."""
+    tree_cx   = data.get('tree_cx',        np.array([], dtype=np.float32))
+    tree_cy   = data.get('tree_cy',        np.array([], dtype=np.float32))
+    tree_r    = data.get('tree_radius',    np.array([], dtype=np.float32))
+    tree_h    = data.get('tree_height',    np.array([], dtype=np.float32))
+    tree_viol = data.get('tree_violating', np.array([], dtype=bool))
+    thr = LIDAR_CORRIDORS[corridor_key]['clearance_threshold_m']
+    hw  = LIDAR_CORRIDORS[corridor_key]['corridor_half_width_m']
+
+    x_min  = float(data['grid_x_min'])
+    x_max  = float(data['grid_x_max'])
+    y_min  = float(data['grid_y_min'])
+    y_max  = float(data['grid_y_max'])
+    line_y = (y_min + y_max) / 2.0
+
+    fig, ax = plt.subplots(figsize=(13, 5))
+    ax.set_facecolor('#e8ede8')
+    fig.patch.set_facecolor('white')
+
+    # Forest background outside clear strip
+    ax.axhspan(y_min, line_y - hw, color='#c8dfc8', alpha=0.6, zorder=1)
+    ax.axhspan(line_y + hw, y_max, color='#c8dfc8', alpha=0.6, zorder=1)
+
+    # Clear strip background
+    ax.axhspan(line_y - hw, line_y + hw, color='#fffde7', alpha=0.9, zorder=1)
+    ax.axhline(line_y - hw, color='#757575', lw=1.5, ls='--', zorder=2)
+    ax.axhline(line_y + hw, color='#757575', lw=1.5, ls='--', zorder=2)
+    ax.axhline(line_y, color='#9e9e9e', lw=0.8, ls=':', zorder=2)
+
+    # Labels for clear strip boundaries
+    ax.text(x_min + 2, line_y + hw + 0.5, f'Clear zone boundary (+{hw}m)', fontsize=7, color='#555')
+    ax.text(x_min + 2, line_y - hw - 1.2, f'Clear zone boundary (−{hw}m)', fontsize=7, color='#555')
+
+    # DBSCAN tree crowns as circles
+    n_drawn = len(tree_cx)
+    for i in range(n_drawn):
+        r       = max(float(tree_r[i]), 0.5) if len(tree_r) > i else 2.0
+        is_viol = bool(tree_viol[i])          if len(tree_viol) > i else False
+        h       = float(tree_h[i])            if len(tree_h) > i else 0.0
+
+        if is_viol:
+            color, edge, alpha = '#C62828', '#8B0000', 0.85
+        elif h > thr * 0.8:
+            color, edge, alpha = '#F9A825', '#E65100', 0.80
+        else:
+            color, edge, alpha = '#388E3C', '#1B5E20', 0.65
+
+        circle = plt.Circle(
+            (float(tree_cx[i]), float(tree_cy[i])), r,
+            color=color, ec=edge, lw=0.5, alpha=alpha, zorder=3
+        )
+        ax.add_patch(circle)
+
+    # Legend
+    legend_patches = [
+        mpatches.Patch(color='#388E3C', label='Clear (below threshold)'),
+        mpatches.Patch(color='#F9A825', label=f'Amber  > {thr*0.8:.1f} m — approaching'),
+        mpatches.Patch(color='#C62828', label=f'Violation  > {thr} m — exceeds NERC FAC-003'),
+        mpatches.Patch(color='#fffde7', ec='#757575', ls='--', label=f'Clear strip  ±{hw} m'),
+    ]
+    ax.legend(handles=legend_patches, loc='upper right', fontsize=8, framealpha=0.92)
+
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min - 2, y_max + 2)
+    ax.set_xlabel('Along-corridor distance (m)', fontsize=9)
+    ax.set_ylabel('Cross-corridor distance (m)', fontsize=9)
+    ax.set_title(
+        f'DBSCAN Tree Crown Map — {corridor_key.split("—")[0].strip()}\n'
+        f'Each circle = one detected crown  |  Radius = crown radius  |  Colour = clearance status',
+        fontsize=10, fontweight='bold'
+    )
+    plt.tight_layout()
+    return _fig_to_bytes(fig)
+
+
+def _export_3d_png(fig) -> bytes | None:
+    """Export the cached Plotly 3D scatter as a static PNG using kaleido."""
+    try:
+        import plotly.io as pio
+        return pio.to_image(fig, format='png', width=960, height=540, scale=1.5)
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Layer 3: prompt and fallback
 # ---------------------------------------------------------------------------
@@ -417,7 +502,8 @@ def _add_inline_bold(paragraph, text):
 
 def _build_word_doc(data: dict, brief_text: str, model_used: str,
                     clearance_chart_bytes: bytes, chm_bytes: bytes,
-                    corridor_key: str) -> bytes:
+                    corridor_key: str, fig_3d_bytes: bytes = None,
+                    corridor_map_bytes: bytes = None) -> bytes:
     """Build a formatted Word document with stats, charts, and inspection brief."""
     doc = Document()
     section = doc.sections[0]
@@ -439,6 +525,19 @@ def _build_word_doc(data: dict, brief_text: str, model_used: str,
     doc.add_paragraph(f"Voltage: {meta['voltage_kv']} kV  |  Clearance threshold: {meta['clearance_threshold_m']} m")
     doc.add_paragraph(meta['context'])
     doc.add_paragraph()
+
+    # 3D point cloud snapshot
+    if fig_3d_bytes:
+        p0 = doc.add_paragraph()
+        p0.add_run('Layer 1 — 3D Point Cloud Snapshot').bold = True
+        p0.runs[0].font.size = Pt(13)
+        doc.add_picture(io.BytesIO(fig_3d_bytes), width=Inches(6.0))
+        cap = doc.add_paragraph()
+        cap.add_run(
+            'RF classification: brown = ground, green shades = vegetation height classes, red = clearance violation crowns.'
+        ).italic = True
+        cap.runs[0].font.size = Pt(9)
+        doc.add_paragraph()
 
     # Layer 2 stats table
     p = doc.add_paragraph()
@@ -472,6 +571,14 @@ def _build_word_doc(data: dict, brief_text: str, model_used: str,
     if clearance_chart_bytes:
         doc.add_picture(io.BytesIO(clearance_chart_bytes), width=Inches(4.5))
     doc.add_paragraph()
+
+    # Corridor crown map
+    if corridor_map_bytes:
+        p2b = doc.add_paragraph()
+        p2b.add_run('DBSCAN Tree Crown Map').bold = True
+        p2b.runs[0].font.size = Pt(13)
+        doc.add_picture(io.BytesIO(corridor_map_bytes), width=Inches(6.0))
+        doc.add_paragraph()
 
     # CHM panels
     p3 = doc.add_paragraph()
@@ -777,7 +884,18 @@ for smooth browser rendering. The analysis used the full dataset.
         st.metric("Violation area", f"{float(data['violation_pct']):.1f}%")
 
     clearance_chart_bytes = _build_clearance_chart(data, corridor_key)
-    st.image(clearance_chart_bytes, use_column_width=False, width=450)
+    corridor_map_bytes    = _build_corridor_map(data, corridor_key)
+
+    st.markdown("**Top-down corridor view — DBSCAN tree crown map**")
+    st.image(corridor_map_bytes, use_container_width=True)
+    st.caption(
+        "Each circle is one tree crown detected by DBSCAN. "
+        "Radius matches the crown's spatial extent. "
+        "Colour shows clearance status against the NERC FAC-003 threshold for this voltage."
+    )
+
+    st.markdown("**Tree count by clearance status**")
+    st.image(clearance_chart_bytes, use_column_width=False, width=420)
 
     with st.expander("⚠️ What this algorithm cannot detect", expanded=False):
         st.markdown(f"""
@@ -862,6 +980,19 @@ step that turns a one-time survey into a predictive maintenance programme.
         brief_text = st.session_state[brief_key]
         model_used = st.session_state.get(model_key)
 
+        # Export 3D PNG once and cache it
+        png_key = cache_key + "_3d_png"
+        if png_key not in st.session_state:
+            cached_fig = st.session_state.get(cache_key + "_fig3d")
+            st.session_state[png_key] = _export_3d_png(cached_fig) if cached_fig is not None else None
+        fig_3d_bytes = st.session_state.get(png_key)
+
+        # Show static 3D snapshot above the brief
+        if fig_3d_bytes:
+            st.markdown("**3D point cloud snapshot**")
+            st.image(fig_3d_bytes, use_container_width=True)
+            st.caption("Static export of the interactive 3D chart above. Included in the Word document download.")
+
         with st.expander("📋 AI Clearance Inspection Brief", expanded=True):
             st.markdown(brief_text)
             if model_used:
@@ -887,7 +1018,9 @@ step that turns a one-time survey into a predictive maintenance programme.
         with dl2:
             word_bytes = _build_word_doc(
                 data, brief_text, model_used or "built-in fallback",
-                clearance_chart_bytes, chm_bytes, corridor_key
+                clearance_chart_bytes, chm_bytes, corridor_key,
+                fig_3d_bytes=fig_3d_bytes,
+                corridor_map_bytes=corridor_map_bytes,
             )
             st.download_button(
                 label="⬇ Download brief (.docx)",

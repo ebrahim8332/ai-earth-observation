@@ -18,3 +18,4 @@ python-docx
 contextily
 laspy
 open3d
+kaleido
