@@ -1236,6 +1236,25 @@ UTM zone for this corridor: **{meta.get('utm_zone', 'see corridor metadata')}**.
         f"assuming {growth_rate} m/year uniform growth."
     )
 
+    # Explain flat result so it doesn't look like a bug
+    _tree_h  = data.get('tree_height', np.array([], dtype=np.float32))
+    _tree_cy = data.get('tree_cy',     np.array([], dtype=np.float32))
+    _line_y  = (float(data['grid_y_min']) + float(data['grid_y_max'])) / 2.0
+    _hw      = meta['corridor_half_width_m']
+    _thr     = meta['clearance_threshold_m']
+    if len(_tree_cy) and len(_tree_h):
+        _in_strip = np.array([abs(float(_tree_cy[i]) - _line_y) <= _hw for i in range(len(_tree_cy))])
+        _h_strip  = _tree_h[_in_strip]
+        _now_count = int(((_h_strip) > _thr).sum())
+        _yr3_count = int(((_h_strip + growth_rate * 3) > _thr).sum())
+        if _yr3_count == _now_count:
+            st.info(
+                f"All four bars are equal at {growth_rate} m/yr. "
+                f"The {_now_count} current violations are already above the threshold. "
+                f"No other strip trees are close enough to {_thr}m to breach within 3 years at this rate. "
+                f"**Try the slider at 1.0–1.5 m/yr** to see new violations emerge."
+            )
+
     with st.expander("What growth rates should I use?", expanded=False):
         st.markdown("""
 Growth rate varies by species, soil, rainfall, and competition.
