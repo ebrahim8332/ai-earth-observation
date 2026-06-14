@@ -245,11 +245,12 @@ def _build_chm_fig(data: dict, corridor_key: str) -> bytes:
         extent=[x_min, x_max, y_min, y_max],
         cmap='Greens', alpha=0.5, vmin=0, vmax=float(np.nanmax(CHM))
     )
-    masked_viol = np.ma.masked_where(violation_map == 0, violation_map)
+    # Paint violations as solid bright red using an RGBA overlay
+    red_overlay = np.zeros((*CHM.shape, 4), dtype=float)
+    red_overlay[violation_map == 1] = [1.0, 0.1, 0.1, 0.92]
     axes[1].imshow(
-        masked_viol, origin='lower', aspect='auto',
+        red_overlay, origin='lower', aspect='auto',
         extent=[x_min, x_max, y_min, y_max],
-        cmap='Reds', alpha=0.85, vmin=0, vmax=1
     )
     axes[1].axhspan(line_y - hw, line_y + hw, alpha=0.08, color='yellow')
     red_p = mpatches.Patch(color='red', alpha=0.7, label=f'Violation (>{thr}m)')
@@ -1051,12 +1052,6 @@ step that turns a one-time survey into a predictive maintenance programme.
         if png_key not in st.session_state:
             st.session_state[png_key] = _build_3d_static_png(data, corridor_key)
         fig_3d_bytes = st.session_state.get(png_key)
-
-        # Show static 3D snapshot above the brief
-        if fig_3d_bytes:
-            st.markdown("**3D point cloud snapshot**")
-            st.image(fig_3d_bytes, use_container_width=True)
-            st.caption("Static export of the interactive 3D chart above. Included in the Word document download.")
 
         with st.expander("📋 AI Clearance Inspection Brief", expanded=True):
             st.markdown(brief_text)
