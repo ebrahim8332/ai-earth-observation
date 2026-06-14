@@ -1181,13 +1181,13 @@ the statistical anomaly. The algorithm (Layer 2) finds; the AI (Layer 3) explain
                 if st.button("Generate AI Inspection Brief", key="gen_insp_brief"):
                     with st.spinner("Calling AI..."):
                         prompt  = _inspection_prompt(zone_stats, flagged_segs)
-                        result  = ai_chain.complete(
+                        brief_text, model_used = ai_chain.complete(
                             prompt,
                             groq_key=config.GROQ_API_KEY,
                             gemini_key=config.GEMINI_API_KEY,
                         )
-                        st.session_state["insp_brief"]       = result.get("text", "")
-                        st.session_state["insp_brief_model"]  = result.get("model", "")
+                        st.session_state["insp_brief"]       = brief_text or ""
+                        st.session_state["insp_brief_model"]  = model_used or ""
                         if not st.session_state["insp_brief"]:
                             st.session_state["insp_brief"] = _inspection_fallback(zone_stats, flagged_segs)
                         st.rerun()
@@ -1455,13 +1455,13 @@ The algorithm finds; the AI explains.
                             n_crowns, n_encroach, pred_counts,
                             PIXEL_M, VH, VW, lidar_stats
                         )
-                        result = ai_chain.complete(
+                        brief_text, model_used = ai_chain.complete(
                             prompt,
                             groq_key=config.GROQ_API_KEY,
                             gemini_key=config.GEMINI_API_KEY,
                         )
-                        st.session_state["veg_brief"]       = result.get("text", "")
-                        st.session_state["veg_brief_model"] = result.get("model", "")
+                        st.session_state["veg_brief"]       = brief_text or ""
+                        st.session_state["veg_brief_model"] = model_used or ""
                         if not st.session_state["veg_brief"]:
                             st.session_state["veg_brief"] = _vegetation_fallback(
                                 n_crowns, n_encroach, lidar_stats
