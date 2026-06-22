@@ -20,12 +20,13 @@ PROVIDER_CHAIN = []
 
 if config.has_gemini():
     PROVIDER_CHAIN += [
-        ("gemini", "gemini-2.5-pro",        "Gemini 2.5 Pro"),
-        ("gemini", "gemini-2.5-flash",       "Gemini 2.5 Flash"),
-        ("gemini", "gemini-2.0-flash",       "Gemini 2.0 Flash"),
-        ("gemini", "gemini-2.0-flash-lite",  "Gemini 2.0 Flash Lite"),
-        ("gemini", "gemini-2.5-flash-lite",  "Gemini 2.5 Flash Lite"),
-        ("gemini", "gemini-flash-latest",    "Gemini Flash Latest"),
+        ("gemini", "gemini-2.5-pro",           "Gemini 2.5 Pro"),
+        ("gemini", "gemini-3-flash-preview",   "Gemini 3 Flash Preview"),
+        ("gemini", "gemini-3.1-flash-lite",    "Gemini 3.1 Flash Lite"),
+        ("gemini", "gemini-2.5-flash",         "Gemini 2.5 Flash"),
+        ("gemini", "gemini-2.5-flash-lite",    "Gemini 2.5 Flash Lite"),
+        ("gemini", "gemini-2.0-flash",         "Gemini 2.0 Flash"),
+        ("gemini", "gemini-2.0-flash-lite",    "Gemini 2.0 Flash Lite"),
     ]
 
 if config.has_groq():
@@ -35,6 +36,13 @@ if config.has_groq():
         ("groq", "qwen/qwen3-32b",                                  "Groq Qwen3 32B"),
         ("groq", "openai/gpt-oss-120b",                             "Groq GPT-OSS 120B"),
         ("groq", "llama-3.1-8b-instant",                            "Groq Llama 3.1 8B"),
+        ("groq", "openai/gpt-oss-20b",                              "Groq GPT-OSS 20B"),
+    ]
+
+# gemini-flash-latest is an unstable alias — appended last, after all Groq models
+if config.has_gemini():
+    PROVIDER_CHAIN += [
+        ("gemini", "gemini-flash-latest",      "Gemini Flash Latest"),
     ]
 
 # Session state for chain locking: tracks which index we last succeeded at.

@@ -7,16 +7,20 @@ mid-session (rate limit or server error), the chain continues from that
 point and re-locks to the next working model.
 
 Chain order when both keys are present (best quality first):
-  [0]  gemini-2.5-flash        — best available on free tier (2.5-pro requires paid billing)
-  [1]  gemini-2.0-flash        — reliable, good quality
-  [2]  gemini-2.0-flash-lite   — lighter, still strong
-  [3]  gemini-2.5-flash-lite   — lightest named Gemini option
-  [4]  gemini-flash-latest     — alias, resolves to latest stable Flash
-  [5]  llama-3.3-70b-versatile — Groq Tier 1
-  [6]  llama-4-scout-17b       — Groq Tier 2, high limits
-  [7]  qwen3-32b               — Groq Tier 3
-  [8]  gpt-oss-120b            — Groq Tier 4, 200K TPD
-  [9]  llama-3.1-8b-instant    — Groq last resort, very high RPD
+  [0]  gemini-2.5-pro          — highest quality Gemini model
+  [1]  gemini-3-flash-preview  — matches 2.5 Pro quality, 3x faster
+  [2]  gemini-3.1-flash-lite   — best speed-to-quality in Gemini tier
+  [3]  gemini-2.5-flash        — reliable all-rounder
+  [4]  gemini-2.5-flash-lite   — lighter variant of 2.5 Flash
+  [5]  gemini-2.0-flash        — deprecated June 2026, 8K output cap
+  [6]  gemini-2.0-flash-lite   — deprecated June 2026, 8K output cap
+  [7]  llama-3.3-70b-versatile — Groq Tier 1
+  [8]  llama-4-scout-17b       — Groq Tier 2, high limits
+  [9]  qwen3-32b               — Groq Tier 3
+  [10] gpt-oss-120b            — Groq Tier 4, 200K TPD
+  [11] llama-3.1-8b-instant    — Groq Tier 5, very high RPD
+  [12] gpt-oss-20b             — Groq Tier 6, fast, lower nuance
+  [13] gemini-flash-latest     — unstable alias, absolute last resort
 
 If only GROQ_API_KEY is set, Gemini tiers are skipped.
 If neither key is set, complete() returns (None, None) and the caller
@@ -46,19 +50,23 @@ _LOCK_KEY = "ai_chain_locked_index"
 # ---------------------------------------------------------------------------
 
 _GEMINI_MODELS = [
+    "gemini-2.5-pro",
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
-    "gemini-2.5-flash-lite",
-    "gemini-flash-latest",          # alias — resolves to latest stable Flash
+    # gemini-flash-latest is an unstable alias — appended after all Groq models in _build_chain()
 ]
 
 _GROQ_MODELS = [
     "llama-3.3-70b-versatile",
     "meta-llama/llama-4-scout-17b-16e-instruct",
     "qwen/qwen3-32b",
-    "openai/gpt-oss-120b",          # 200K TPD, added from deck-studio chain
+    "openai/gpt-oss-120b",
     "llama-3.1-8b-instant",
+    "openai/gpt-oss-20b",           # smaller/faster sibling to 120B, last Groq resort
 ]
 
 
@@ -77,6 +85,10 @@ def _build_chain(groq_key, gemini_key):
     if groq_key:
         for model in _GROQ_MODELS:
             chain.append(("groq", model, groq_key))
+
+    # gemini-flash-latest is an unstable alias — it goes last, after all Groq models
+    if gemini_key:
+        chain.append(("gemini", "gemini-flash-latest", gemini_key))
 
     return chain
 
