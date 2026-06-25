@@ -161,12 +161,8 @@ def complete(prompt, groq_key="", gemini_key=""):
     if not chain:
         return None, None
 
-    start = st.session_state.get(_LOCK_KEY, 0)
-    # Guard against a stale lock pointing past the end of this chain
-    start = min(start, len(chain) - 1)
-
     errors = []
-    for i in range(start, len(chain)):
+    for i in range(len(chain)):
         provider, model_name, key = chain[i]
 
         try:
