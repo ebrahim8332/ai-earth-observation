@@ -45,7 +45,7 @@ _VISION_GEMINI_MODELS = [
 ]
 
 _VISION_GROQ_MODELS = [
-    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "qwen/qwen3.6-27b",
     "meta-llama/llama-4-maverick-17b-128e-instruct",
 ]
 

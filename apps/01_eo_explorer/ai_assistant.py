@@ -32,7 +32,7 @@ if config.has_gemini():
 if config.has_groq():
     PROVIDER_CHAIN += [
         ("groq", "llama-3.3-70b-versatile",                        "Groq Llama 3.3 70B"),
-        ("groq", "meta-llama/llama-4-scout-17b-16e-instruct",      "Groq Llama 4 Scout"),
+        ("groq", "qwen/qwen3.6-27b",                               "Groq Qwen 3.6 27B"),
         ("groq", "qwen/qwen3-32b",                                  "Groq Qwen3 32B"),
         ("groq", "openai/gpt-oss-120b",                             "Groq GPT-OSS 120B"),
         ("groq", "llama-3.1-8b-instant",                            "Groq Llama 3.1 8B"),
