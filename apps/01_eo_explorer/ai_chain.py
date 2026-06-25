@@ -37,13 +37,6 @@ Usage:
         st.markdown(fallback_text)
 """
 
-import streamlit as st
-
-# Session state key for the locked provider index.
-# One lock is shared across all modules in a session — once a model works
-# it is reused everywhere.
-_LOCK_KEY = "ai_chain_locked_index"
-
 # ---------------------------------------------------------------------------
 # Chain definition — ordered list of (provider, model_name) tuples
 # Built at call time from whichever keys are available.
@@ -150,8 +143,8 @@ def _call_groq(prompt, model_name, api_key):
 def complete(prompt, groq_key="", gemini_key=""):
     """Try each provider in order and return (response_text, model_name).
 
-    Locks to the first model that succeeds. Re-locks if the locked model
-    fails and a later one succeeds.
+    Each call starts from position 0 — this app makes one AI call per user
+    interaction, so there is no operation-level lock to maintain.
 
     Returns (None, None) if no keys are provided or all models fail.
     The caller is responsible for showing fallback text in that case.
@@ -162,17 +155,12 @@ def complete(prompt, groq_key="", gemini_key=""):
         return None, None
 
     errors = []
-    for i in range(len(chain)):
-        provider, model_name, key = chain[i]
-
+    for provider, model_name, key in chain:
         try:
             if provider == "gemini":
                 text = _call_gemini(prompt, model_name, key)
             else:
                 text = _call_groq(prompt, model_name, key)
-
-            # Lock (or re-lock) to this working model for the rest of the session
-            st.session_state[_LOCK_KEY] = i
             return text, model_name
 
         except Exception as e:
@@ -181,9 +169,3 @@ def complete(prompt, groq_key="", gemini_key=""):
 
     # All models exhausted
     return None, None
-
-
-def active_model():
-    """Return the name of the currently locked model, or None if not yet locked."""
-    locked = st.session_state.get(_LOCK_KEY)
-    return None if locked is None else f"chain position {locked}"
