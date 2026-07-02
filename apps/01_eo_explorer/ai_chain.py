@@ -14,9 +14,8 @@ Chain order when both keys are present (best quality first):
   [4]  gemini-2.5-flash-lite   — lighter variant of 2.5 Flash
   [5]  gemini-2.0-flash        — deprecated June 2026, 8K output cap
   [6]  gemini-2.0-flash-lite   — deprecated June 2026, 8K output cap
-  [7]  llama-3.3-70b-versatile — Groq Tier 1
-  [8]  llama-4-scout-17b       — Groq Tier 2, high limits
-  [9]  qwen3-32b               — Groq Tier 3
+  [7]  qwen/qwen3.6-27b         — Groq Tier 1 (replaces llama-3.3-70b, deprecated Jul 2 2026)
+  [8]  qwen/qwen3-32b           — Groq Tier 2
   [10] gpt-oss-120b            — Groq Tier 4, 200K TPD
   [11] llama-3.1-8b-instant    — Groq Tier 5, very high RPD
   [12] gpt-oss-20b             — Groq Tier 6, fast, lower nuance
@@ -54,7 +53,8 @@ _GEMINI_MODELS = [
 ]
 
 _GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
+    # llama-3.3-70b-versatile deprecated July 2, 2026; decommission Aug 16, 2026.
+    # qwen3.6-27b promoted to first Groq slot as Groq-recommended replacement.
     "qwen/qwen3.6-27b",
     "qwen/qwen3-32b",
     "openai/gpt-oss-120b",
