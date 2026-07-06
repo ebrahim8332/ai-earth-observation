@@ -33,5 +33,15 @@ notebooks/*.png
 # Streamlit
 .streamlit/secrets.toml
 
-# Deploy repo — Streamlit Cloud runtime only
+# Deploy repo — nothing but what Streamlit Cloud needs to run the app, no
+# exceptions. Documentation, notebooks, prompts, architecture diagrams,
+# sample datasets, and dev-container config all belong in dev source only.
 README.md
+AGENTS.md
+CLAUDE.md
+PROJECT.md
+architecture/
+datasets/
+notebooks/
+prompts/
+.devcontainer/
