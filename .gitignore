@@ -32,3 +32,6 @@ notebooks/*.png
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Deploy repo — Streamlit Cloud runtime only
+README.md
