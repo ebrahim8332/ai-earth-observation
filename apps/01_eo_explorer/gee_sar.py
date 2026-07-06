@@ -107,7 +107,9 @@ def fetch_sar_image(bbox, date_str, gee_available):
         return image, count, bbox
 
     except Exception:
-        return None, 0, bbox
+        # -1 signals a real query failure (network, auth, quota) so the
+        # caller can tell it apart from a genuine "0 scenes found" result.
+        return None, -1, bbox
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +127,11 @@ def get_backscatter_stats(image, bbox):
       Vegetation:    -15 to -10 dB
       Urban/ships:    -5 to  +5 dB
 
-    Returns a dict with keys VV_min, VV_max, VV_mean, VH_min, VH_max, VH_mean.
+    Returns a dict with keys VV_min, VV_max, VV_mean, VH_min, VH_max, VH_mean,
+    or None if the statistics could not be computed — either a real Earth
+    Engine error, or no valid (unmasked) pixels for a band in this area.
+    Callers must treat None as a failure and show it to the user, not
+    substitute placeholder numbers.
     """
     try:
         import ee
@@ -141,21 +147,22 @@ def get_backscatter_stats(image, bbox):
             maxPixels=1e8,
         ).getInfo()
 
-        return {
-            "VV_min":  round(stats.get("VV_min",  -25.0), 1),
-            "VV_max":  round(stats.get("VV_max",    5.0), 1),
-            "VV_mean": round(stats.get("VV_mean", -12.0), 1),
-            "VH_min":  round(stats.get("VH_min",  -35.0), 1),
-            "VH_max":  round(stats.get("VH_max",    0.0), 1),
-            "VH_mean": round(stats.get("VH_mean", -20.0), 1),
-        }
+        keys   = ["VV_min", "VV_max", "VV_mean", "VH_min", "VH_max", "VH_mean"]
+        values = {k: stats.get(k) for k in keys}
+
+        if any(v is None for v in values.values()):
+            # Earth Engine returned no valid pixels for at least one band
+            # (e.g. a fully masked or no-data scene) — this is a real
+            # data gap, not something to paper over with a fake number.
+            return None
+
+        return {k: round(v, 1) for k, v in values.items()}
 
     except Exception:
-        # Return plausible defaults so the UI does not crash
-        return {
-            "VV_min": -25.0, "VV_max": 5.0, "VV_mean": -12.0,
-            "VH_min": -35.0, "VH_max": 0.0, "VH_mean": -20.0,
-        }
+        # A real Earth Engine error (network, auth, quota). Do not
+        # fabricate plausible-looking numbers — the caller must show
+        # this as a failure.
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +440,9 @@ def get_sar_interpretation(stats1, stats2, date1_str, date2_str,
             "technical but non-specialist audience. "
             "Cover: what the backscatter values indicate about "
             "surface types, what changed between the two dates, "
-            "one practical application, and one key limitation of SAR.\n\n"
+            "one practical application, and one key limitation of SAR. "
+            "Write at least 200 words total, with a substantive paragraph "
+            "(minimum 40 words) for each of the four points.\n\n"
             f"Interpret this Sentinel-1 SAR analysis:\n\n{context}"
         )
         text, model = ai_chain.complete(full_prompt, groq_key=groq_key, gemini_key=gemini_key)

@@ -45,6 +45,7 @@ GAS_CONFIG = {
             "Gas pipeline leaks, LNG facilities, coal seam gas, landfill emissions. "
             "Readings above 1950 ppb over an industrial region indicate significant fugitive emissions."
         ),
+        "elevated_threshold": 1950,
     },
     "Nitrogen Dioxide (NO2)": {
         "collection":    "COPERNICUS/S5P/OFFL/L3_NO2",
@@ -67,6 +68,7 @@ GAS_CONFIG = {
             "Power plant combustion, fleet operations, and regulatory compliance monitoring. "
             "Useful for identifying which industrial zones are exceeding emission thresholds."
         ),
+        "elevated_threshold": 0.0001,
     },
     "Carbon Monoxide (CO)": {
         "collection":    "COPERNICUS/S5P/OFFL/L3_CO",
@@ -89,6 +91,7 @@ GAS_CONFIG = {
             "Industrial fires, wildfire risk to infrastructure, and emergency response planning. "
             "Elevated CO over a region indicates active combustion within or upwind of the area."
         ),
+        "elevated_threshold": 0.05,
     },
     "Sulfur Dioxide (SO2)": {
         "collection":    "COPERNICUS/S5P/OFFL/L3_SO2",
@@ -111,6 +114,7 @@ GAS_CONFIG = {
             "Industrial site emissions, coal plant stack monitoring, and compliance tracking. "
             "Also used for volcanic hazard monitoring when SO2 spikes precede eruptions."
         ),
+        "elevated_threshold": 0.0003,
     },
 }
 
@@ -359,13 +363,34 @@ def build_interpretation_prompt(gas_key, mean_val, region, actual_date):
 
     The four sections are designed to deliver operational value:
     PATTERN / SOURCE ATTRIBUTION / REGULATORY CONTEXT / UTILITY ACTION
+
+    The elevated-vs-normal classification is computed here in Python against
+    each gas's elevated_threshold (Layer 2), not left for the LLM to infer
+    from the raw number and a paragraph of description text — the project's
+    own three-layer rule is that generative AI explains a finding, it does
+    not produce the finding itself.
     """
     cfg = GAS_CONFIG[gas_key]
 
     if mean_val is not None:
-        val_str = f"{mean_val:.4f} {cfg['unit']}"
+        # mol/m^2 column-density gases (NO2/CO/SO2) have thresholds down at
+        # 1e-4 to 1e-3 — a plain .4f format collapses meaningful sub-threshold
+        # readings to "0.0000", which reads as zero when it is not. ppb (CH4)
+        # values are in the thousands, so one decimal place is precise enough.
+        val_str = f"{mean_val:.1f} {cfg['unit']}" if cfg["unit"] == "ppb" else f"{mean_val:.6f} {cfg['unit']}"
+
+        threshold = cfg.get("elevated_threshold")
+        if threshold is not None:
+            classification = (
+                f"ELEVATED — above this gas's elevated-reading threshold of {threshold} {cfg['unit']}"
+                if mean_val > threshold
+                else f"within normal background range (below the {threshold} {cfg['unit']} elevated-reading threshold)"
+            )
+        else:
+            classification = "not classified — no threshold configured for this gas"
     else:
         val_str = f"data unavailable ({cfg['unit']})"
+        classification = "unknown — no data available for this reading"
 
     prompt = f"""You are an environmental data analyst interpreting satellite atmospheric measurements for a utility or infrastructure operator.
 
@@ -373,6 +398,7 @@ TROPOMI Sentinel-5P data — {gas_key}
 Region: {region}
 Period: {actual_date} (7-day composite)
 Regional average: {val_str}
+Layer 2 classification (already computed — do not re-derive this yourself): {classification}
 Data source: Copernicus Sentinel-5P TROPOMI (European Space Agency)
 
 {cfg['description']}
@@ -383,7 +409,7 @@ Relevance to utilities and industry:
 Write a structured interpretation with exactly four labeled sections:
 
 PATTERN
-Describe what the regional average value indicates. Is it elevated, normal, or low compared to background levels? What does the spatial pattern visible in the data suggest about where concentrations are highest?
+State the Layer 2 classification given above (elevated or normal) — it has already been computed, do not re-judge it from the raw number. Explain what that classification means in context. What does the spatial pattern visible in the data suggest about where concentrations are highest?
 
 SOURCE ATTRIBUTION
 What are the most likely emission sources producing this reading at this location and time of year? Be specific to the region and the gas. Consider industrial activity, seasonal factors, and natural sources.
@@ -394,7 +420,7 @@ What emission standards or reporting obligations apply to this gas in this type 
 UTILITY ACTION
 What specific action should a utility operator, infrastructure manager, or environmental compliance team take based on this reading? Be concrete and operational.
 
-Keep each section to 3-5 sentences. Use plain language. No bullet points within sections."""
+Each section must be a minimum of 60 words (minimum 240 words total across all four sections). Use plain language. No bullet points within sections."""
 
     return prompt
 
@@ -413,9 +439,15 @@ def get_emissions_interpretation(gas_key, mean_val, region, actual_date,
 
     # Built-in fallback — substantive, not a placeholder
     cfg = GAS_CONFIG[gas_key]
+    if mean_val is not None:
+        val_str = f"{mean_val:.1f} {cfg['unit']}" if cfg["unit"] == "ppb" else f"{mean_val:.6f} {cfg['unit']}"
+    else:
+        # No live AI text AND no regional mean (e.g. all GEE sample points
+        # returned no data) — must not format None with a numeric spec.
+        val_str = f"data unavailable ({cfg['unit']})"
     fallback = (
         f"**{gas_key} — {region} — {actual_date}**\n\n"
-        f"Regional average: {mean_val:.4f} {cfg['unit']} (if available).\n\n"
+        f"Regional average: {val_str}\n\n"
         f"{cfg['description']}\n\n"
         f"**Utility relevance:** {cfg['utility_relevance']}\n\n"
         "Add a GROQ_API_KEY or GEMINI_API_KEY to Streamlit secrets to enable full AI interpretation."

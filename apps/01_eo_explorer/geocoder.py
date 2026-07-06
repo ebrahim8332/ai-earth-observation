@@ -6,7 +6,15 @@ Uses two geocoding services in sequence:
   2. OpenStreetMap Nominatim — free, no API key, rate-limited (1 req/sec).
 
 Returns a bounding box [min_lon, min_lat, max_lon, max_lat] suitable for STAC/GEE queries.
-Returns None if both services fail.
+Returns (None, None) if both services fail.
+
+Ambiguous or low-confidence matches (e.g. "Georgia" matching the country when a
+US state was meant, or a place name with several similarly-named results) are
+not silently resolved to whichever candidate the service ranks first. The
+match is still returned — the caller always gets a usable bbox — but a
+warning string describing exactly what was matched is returned alongside it,
+so the UI can tell the user which location was actually used and let them
+narrow the query if it is wrong.
 """
 
 import time
@@ -16,29 +24,39 @@ import requests
 # 0.5 degrees is roughly 50 km — a reasonable default for city-level queries.
 DEFAULT_BBOX_SIZE_DEG = 0.5
 
+# ArcGIS match score (0-100) below which a result is flagged as low-confidence
+# rather than silently accepted as the intended location.
+ARCGIS_CONFIDENCE_THRESHOLD = 80
+
 # Nominatim requires a descriptive User-Agent.
 NOMINATIM_HEADERS = {
     "User-Agent": "EOIL-Portal/1.5 (AI-Native Earth Observation Innovation Lab; contact: eoil@example.com)"
 }
 
 
-def geocode_place(place_name: str) -> list | None:
+def geocode_place(place_name: str) -> tuple:
     """Convert a place name to a bounding box [min_lon, min_lat, max_lon, max_lat].
 
     Tries ArcGIS first (more reliable on shared IPs), then Nominatim as backup.
-    Returns None if both services fail or return no results.
+
+    Returns (bbox, warning). bbox is None if both services fail or return no
+    results. warning is None when the match looks solid, or a plain-English
+    string naming the actual matched location when the match was ambiguous
+    or low-confidence — the caller should show this to the user rather than
+    discard it, since a silently-wrong bbox feeds wrong coordinates into
+    every downstream analytical module.
     """
     if not place_name or not place_name.strip():
-        return None
+        return None, None
 
     name = place_name.strip()
 
-    bbox = _geocode_arcgis(name)
+    bbox, warning = _geocode_arcgis(name)
     if bbox:
-        return bbox
+        return bbox, warning
 
-    bbox = _geocode_nominatim(name)
-    return bbox
+    bbox, warning = _geocode_nominatim(name)
+    return bbox, warning
 
 
 # ---------------------------------------------------------------------------
@@ -47,13 +65,20 @@ def geocode_place(place_name: str) -> list | None:
 # Returns an extent object (bounding box) for region-level queries.
 # ---------------------------------------------------------------------------
 
-def _geocode_arcgis(place_name: str) -> list | None:
-    """Try the ArcGIS World Geocoding Service and return a bbox, or None."""
+def _geocode_arcgis(place_name: str) -> tuple:
+    """Try the ArcGIS World Geocoding Service and return (bbox, warning), or (None, None).
+
+    ArcGIS returns a 0-100 match "score" per candidate. A low score means the
+    service is not confident this candidate is what the user meant (common
+    for short or generic names — "Georgia" matches the country before the
+    US state). Requesting 3 candidates also lets us tell a single clear match
+    apart from several similarly-ranked ones.
+    """
     url    = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates"
     params = {
         "SingleLine": place_name,
         "f":          "json",
-        "maxLocations": 1,
+        "maxLocations": 3,
         "outFields":  "Addr_type",
     }
     try:
@@ -63,24 +88,51 @@ def _geocode_arcgis(place_name: str) -> list | None:
         candidates = data.get("candidates", [])
 
         if not candidates:
-            return None
+            return None, None
 
         candidate = candidates[0]
-        extent    = candidate.get("extent")
+        score     = candidate.get("score", 100)
+        address   = candidate.get("address", place_name)
+
+        warning = None
+        if score < ARCGIS_CONFIDENCE_THRESHOLD:
+            warning = (
+                f"Low-confidence match for \"{place_name}\" — using \"{address}\" "
+                f"(match score {score}/100). If this isn't the location you meant, "
+                f"try adding a country or region name."
+            )
+        elif len(candidates) > 1:
+            other = candidates[1].get("address", "")
+            other_score = candidates[1].get("score", 0)
+            # Only flag ambiguity when the second candidate is both a close
+            # scoring match AND a genuinely different place — ArcGIS sometimes
+            # returns near-duplicate candidates for the same location, which
+            # would otherwise produce a confusing "second match" identical to
+            # the one just used.
+            if other_score >= score - 5 and other and other != address:
+                warning = (
+                    f"Multiple similar matches for \"{place_name}\" — using \"{address}\". "
+                    f"A close second match was \"{other}\". Try a more specific name if "
+                    f"this isn't the location you meant."
+                )
+
+        extent = candidate.get("extent")
 
         if extent:
             # ArcGIS returns extent as {xmin, ymin, xmax, ymax} — already in lon/lat
-            return [extent["xmin"], extent["ymin"], extent["xmax"], extent["ymax"]]
+            bbox = [extent["xmin"], extent["ymin"], extent["xmax"], extent["ymax"]]
+        else:
+            # Fall back to building a bbox around the returned point
+            loc  = candidate.get("location", {})
+            lon  = float(loc.get("x", 0))
+            lat  = float(loc.get("y", 0))
+            half = DEFAULT_BBOX_SIZE_DEG / 2
+            bbox = [lon - half, lat - half, lon + half, lat + half]
 
-        # Fall back to building a bbox around the returned point
-        loc  = candidate.get("location", {})
-        lon  = float(loc.get("x", 0))
-        lat  = float(loc.get("y", 0))
-        half = DEFAULT_BBOX_SIZE_DEG / 2
-        return [lon - half, lat - half, lon + half, lat + half]
+        return bbox, warning
 
     except Exception:
-        return None
+        return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -89,13 +141,18 @@ def _geocode_arcgis(place_name: str) -> list | None:
 # May be rate-limited on shared cloud IPs under high load.
 # ---------------------------------------------------------------------------
 
-def _geocode_nominatim(place_name: str) -> list | None:
-    """Try Nominatim and return a bbox, or None."""
+def _geocode_nominatim(place_name: str) -> tuple:
+    """Try Nominatim and return (bbox, warning), or (None, None).
+
+    Requests 3 results instead of 1 so a genuinely ambiguous query (multiple
+    distinct places with similar names) can be flagged instead of silently
+    resolved to whichever result Nominatim's internal ranking put first.
+    """
     url    = "https://nominatim.openstreetmap.org/search"
     params = {
         "q":              place_name,
         "format":         "json",
-        "limit":          1,
+        "limit":          3,
         "addressdetails": 0,
     }
     try:
@@ -105,22 +162,33 @@ def _geocode_nominatim(place_name: str) -> list | None:
         results = response.json()
 
         if not results:
-            return None
+            return None, None
 
-        result = results[0]
+        result       = results[0]
+        display_name = result.get("display_name", place_name)
+
+        warning = None
+        if len(results) > 1 and results[1].get("display_name") != display_name:
+            warning = (
+                f"Multiple possible matches for \"{place_name}\" — using "
+                f"\"{display_name}\". Try a more specific name (e.g. add a country) "
+                f"if this isn't the location you meant."
+            )
 
         # Nominatim boundingbox is [south, north, west, east]
         if "boundingbox" in result:
             south, north, west, east = [float(x) for x in result["boundingbox"]]
-            return [west, south, east, north]
+            bbox = [west, south, east, north]
+        else:
+            lat  = float(result["lat"])
+            lon  = float(result["lon"])
+            half = DEFAULT_BBOX_SIZE_DEG / 2
+            bbox = [lon - half, lat - half, lon + half, lat + half]
 
-        lat  = float(result["lat"])
-        lon  = float(result["lon"])
-        half = DEFAULT_BBOX_SIZE_DEG / 2
-        return [lon - half, lat - half, lon + half, lat + half]
+        return bbox, warning
 
     except Exception:
-        return None
+        return None, None
 
 
 def bbox_dims_km(bbox: list) -> tuple:

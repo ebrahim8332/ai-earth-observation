@@ -383,7 +383,7 @@ def _build_priority_df(data: dict, corridor_key: str):
     return df
 
 
-def _build_growth_chart(data: dict, corridor_key: str, growth_rate_m: float) -> bytes:
+def _build_growth_chart(data: dict, corridor_key: str, growth_rate_m: float):
     """Grouped bar chart showing how far violation trees will be above threshold if untreated.
 
     Uses confirmed DBSCAN violation trees only. These are trees already above the clearance
@@ -393,6 +393,11 @@ def _build_growth_chart(data: dict, corridor_key: str, growth_rate_m: float) -> 
 
     This is operationally useful: it tells crews how much trimming margin will be needed
     and how urgently treatment is required.
+
+    Returns None if there are zero confirmed violation trees — there is nothing
+    real to project in that case. The caller must show a "no violations" message
+    rather than treat None as an error; it must never substitute a placeholder
+    tree just to keep the chart populated.
     """
     tree_h    = data.get('tree_height',    np.array([], dtype=np.float32))
     tree_viol = data.get('tree_violating', np.array([], dtype=bool))
@@ -415,7 +420,13 @@ def _build_growth_chart(data: dict, corridor_key: str, growth_rate_m: float) -> 
         # No in-strip violations — use all violations
         viol_heights = [float(h) for h, v in zip(tree_h, tree_viol) if v]
 
-    viol_heights = np.array(viol_heights) if viol_heights else np.array([thr + 0.5])
+    if not viol_heights:
+        # Zero confirmed violation trees anywhere in this corridor — there is
+        # nothing real to project. Do not invent a placeholder tree height;
+        # tell the caller there is no chart to draw.
+        return None
+
+    viol_heights = np.array(viol_heights)
     n_viol = len(viol_heights)
 
     # Average metres above threshold at each time point
@@ -608,8 +619,36 @@ def _build_3d_static_png(data: dict, corridor_key: str) -> bytes | None:
 # Layer 3: prompt and fallback
 # ---------------------------------------------------------------------------
 
-def _build_inspection_prompt(data: dict, corridor_key: str) -> str:
+def _priority_crown_summary(priority_df, max_rows: int = 10) -> str:
+    """Turn the ranked priority-inspection table into text the AI prompt can cite.
+
+    Without this, the AI has only aggregate counts and has to invent specific
+    "zones" or coordinates to satisfy a prompt asking about priority locations.
+    This gives it the same real, ranked, georeferenced crowns already shown to
+    the user in the Priority Inspection Table above.
+    """
+    if priority_df is None or len(priority_df) == 0:
+        return "No confirmed violation or amber-zone crowns were detected — there are no specific crowns to list."
+
+    lines = []
+    for rank, row in priority_df.head(max_rows).iterrows():
+        lines.append(
+            f"  Rank {rank}: {row['Status']}, height {row['Height_m']}m "
+            f"({row['Above_threshold_m']:+.2f}m vs threshold), crown radius {row['Crown_radius_m']}m, "
+            f"{row['Dist_from_centre_m']}m from corridor centreline, "
+            f"UTM {row['X_UTM']}, {row['Y_UTM']} (Zone {row['UTM_zone']})"
+        )
+
+    remaining = len(priority_df) - min(max_rows, len(priority_df))
+    if remaining > 0:
+        lines.append(f"  ...plus {remaining} more lower-priority crown(s) not listed individually above.")
+
+    return "\n".join(lines)
+
+
+def _build_inspection_prompt(data: dict, corridor_key: str, priority_df=None) -> str:
     meta = LIDAR_CORRIDORS[corridor_key]
+    crown_summary = _priority_crown_summary(priority_df)
     return f"""You are an Earth observation and LiDAR analyst producing a structured clearance inspection brief for a utility vegetation management team.
 
 CORRIDOR: {corridor_key}
@@ -626,13 +665,17 @@ LAYER 2 OUTPUTS (computed from USGS 3DEP LiDAR point cloud):
 - Trees in violation: {int(data['n_violating'])} of {int(data['n_trees'])}
 - Corridor violation area: {float(data['violation_pct']):.1f}% of clear zone
 
+RANKED PRIORITY CROWNS (highest urgency first, from the DBSCAN + priority-scoring pipeline):
+{crown_summary}
+
 Write a structured five-element inspection brief. Use exactly these five headings.
+Each section must be a minimum of 80 words (minimum 400 words total across all five sections).
 
 ## 1. Clearance Status
 State the number of violations, the total tree count, and the violation percentage. Reference the voltage and applicable clearance standard. Use the numbers provided.
 
 ## 2. Priority Inspection Zones
-Based on the violation count and corridor context, describe which zones require immediate field inspection. Distinguish between confirmed violations and amber-zone trees approaching the threshold.
+Using ONLY the ranked priority crowns listed above, describe which specific crowns require immediate field inspection — cite their rank, height, and UTM coordinates. Distinguish between confirmed violations and amber-zone trees approaching the threshold. Do NOT invent any crown, zone, or coordinate that is not listed above. If there are more crowns than listed, refer to them as a group (e.g. "the remaining N lower-priority crowns") rather than describing them individually.
 
 ## 3. Sensor Capability
 Explain what airborne LiDAR measures that a satellite cannot. Cover point cloud structure, return physics (why multi-return pulses penetrate canopy), and how height above ground is derived from the DTM. Explain why leaf-on vs leaf-off collection timing matters for clearance analysis.
@@ -1245,13 +1288,21 @@ UTM zone for this corridor: **{meta.get('utm_zone', 'see corridor metadata')}**.
     growth_chart_key = cache_key + f"_growth_{growth_rate}"
     if growth_chart_key not in st.session_state:
         st.session_state[growth_chart_key] = _build_growth_chart(data, corridor_key, growth_rate)
-    st.image(st.session_state[growth_chart_key], use_container_width=False, width=580)
-    st.caption(
-        f"Bars show average metres above the {meta['clearance_threshold_m']}m threshold "
-        f"for the {int(data.get('n_violating', 0))} confirmed violation trees, "
-        f"assuming {growth_rate} m/year uniform growth. "
-        f"The number of violation trees stays the same — they just grow further into the danger zone."
-    )
+
+    growth_chart_bytes = st.session_state[growth_chart_key]
+    if growth_chart_bytes is None:
+        st.success(
+            "No confirmed violation trees in this corridor — there is nothing to project. "
+            "A growth projection only applies once a tree is already flagged as a violation."
+        )
+    else:
+        st.image(growth_chart_bytes, use_container_width=False, width=580)
+        st.caption(
+            f"Bars show average metres above the {meta['clearance_threshold_m']}m threshold "
+            f"for the {int(data.get('n_violating', 0))} confirmed violation trees, "
+            f"assuming {growth_rate} m/year uniform growth. "
+            f"The number of violation trees stays the same — they just grow further into the danger zone."
+        )
 
     with st.expander("What growth rates should I use?", expanded=False):
         st.markdown("""
@@ -1291,7 +1342,7 @@ growth model in the next survey cycle, replacing this uniform assumption.
 
     if st.button("Get AI Inspection Brief", type="primary", key="li_ai_btn"):
         with st.spinner("Generating inspection brief..."):
-            prompt = _build_inspection_prompt(data, corridor_key)
+            prompt = _build_inspection_prompt(data, corridor_key, priority_df)
             text, model_used = ai_chain.complete(
                 prompt,
                 groq_key=config.GROQ_API_KEY,

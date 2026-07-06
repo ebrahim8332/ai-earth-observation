@@ -802,11 +802,13 @@ has shifted across the full period.
             # New location typed — clear any stale map click
             map_picker.clear_click("ts")
             with st.spinner(f"Looking up '{ts_custom_place}'..."):
-                result_bbox = geocoder.geocode_place(ts_custom_place)
+                result_bbox, geocode_warning = geocoder.geocode_place(ts_custom_place)
             if result_bbox:
                 st.session_state.ts_geocoded_place = ts_custom_place.strip()
                 st.session_state.ts_geocoded_bbox  = result_bbox
                 cached_bbox = result_bbox
+                if geocode_warning:
+                    st.info(f"📍 {geocode_warning}")
             else:
                 st.session_state.ts_geocoded_place = ""
                 st.session_state.ts_geocoded_bbox  = None
@@ -881,10 +883,9 @@ has shifted across the full period.
         with st.spinner(f"Fetching {p['dataset']} data for {p['region']}..."):
             try:
                 if gee_available:
-                    df       = gee_timeseries.extract_time_series_gee(
+                    df, is_sample = gee_timeseries.extract_time_series_gee(
                         p["bbox"], p["dataset"], p["start"], p["end"]
                     )
-                    is_sample = False
                 else:
                     df       = gee_timeseries.generate_sample_data(
                         p["region"], p["dataset"], p["start"], p["end"]
@@ -1233,11 +1234,13 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
             # New location typed — clear any stale map click
             map_picker.clear_click("se")
             with st.spinner(f"Looking up '{place_input}'..."):
-                result_bbox = geocoder.geocode_place(place_input)
+                result_bbox, geocode_warning = geocoder.geocode_place(place_input)
             if result_bbox:
                 st.session_state.se_geocoded_place = place_input.strip()
                 st.session_state.se_geocoded_bbox  = result_bbox
                 cached_bbox = result_bbox
+                if geocode_warning:
+                    st.info(f"📍 {geocode_warning}")
             else:
                 st.session_state.se_geocoded_place = ""
                 st.session_state.se_geocoded_bbox  = None
@@ -1274,13 +1277,18 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         st.session_state.se_timeline_items   = []
         st.session_state.se_coverage         = []
         st.session_state.se_best_item        = None
+        st.session_state.se_best_coverage_pct = None
         st.session_state.se_rendered_arr     = None
+        st.session_state.se_rendered_info    = None
+        st.session_state.se_docx_bytes       = None
         st.session_state.se_contact_results  = None
         st.session_state.se_selected_item_id = None
         st.session_state.se_index_stats      = None
         st.session_state.se_spectral_sig     = None
         st.session_state.se_ai_result        = None
         st.session_state.se_ai_model         = None
+        st.session_state.se_explain_single_result = None
+        st.session_state.se_explain_single_model  = None
 
     # -----------------------------------------------------------------------
     # Row 2: Date range + Cloud cover + Search button
@@ -1342,6 +1350,7 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                     )
                 st.session_state.se_best_item = best_item
                 st.session_state.se_coverage  = scores
+                st.session_state.se_best_coverage_pct = best_pct
                 st.session_state.se_rendered_arr    = None
                 st.session_state.se_contact_results = None
                 st.session_state.se_index_stats     = None
@@ -1637,10 +1646,19 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
                 st.divider()
                 if st.button("🤖 AI: Explain this view", key="se_explain_single"):
                     with st.spinner("Asking AI..."):
-                        explanation = spectral_explorer.explain_combination(
+                        explanation, explain_model = spectral_explorer.explain_combination(
                             r_b, g_b, b_b, s_key, info["location_label"]
                         )
-                    st.markdown(explanation)
+                    st.session_state.se_explain_single_result = explanation
+                    st.session_state.se_explain_single_model  = explain_model
+
+                if st.session_state.get("se_explain_single_result"):
+                    st.markdown(st.session_state.se_explain_single_result)
+                    _explain_model = st.session_state.get("se_explain_single_model")
+                    if _explain_model:
+                        st.caption(f"AI response from {_explain_model}")
+                    else:
+                        st.caption("Built-in explanation — no AI key present")
 
         st.divider()
         render_what_am_i_looking_at(
@@ -1789,7 +1807,8 @@ health, water extent, urban heat, burn scars, soil moisture, and more.
         if st.button("🤖 AI: Interpret Full Contact Sheet", key="se_ai_contact", type="primary", use_container_width=True):
             with st.spinner("Generating integrated scene analysis..."):
                 _ai_txt, _ai_mdl = spectral_explorer.get_scene_interpretation(
-                    valid, _valid_idx, _c_sat, _c_loc, _c_date, _c_cloud
+                    valid, _valid_idx, _c_sat, _c_loc, _c_date, _c_cloud,
+                    coverage_pct=st.session_state.get("se_best_coverage_pct"),
                 )
                 st.session_state.se_ai_result = _ai_txt
                 st.session_state.se_ai_model  = _ai_mdl
@@ -2187,11 +2206,13 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
             # New location typed — clear any stale map click
             map_picker.clear_click("sar")
             with st.spinner(f"Looking up '{sar_place}'..."):
-                result_bbox = geocoder.geocode_place(sar_place)
+                result_bbox, geocode_warning = geocoder.geocode_place(sar_place)
             if result_bbox:
                 st.session_state.sar_geocoded_place = sar_place.strip()
                 st.session_state.sar_geocoded_bbox  = result_bbox
                 cached_bbox = result_bbox
+                if geocode_warning:
+                    st.info(f"📍 {geocode_warning}")
             else:
                 st.session_state.sar_geocoded_place = ""
                 st.session_state.sar_geocoded_bbox  = None
@@ -2275,45 +2296,61 @@ monitoring, and tropical deforestation — anywhere optical sensors are blocked.
         p = st.session_state.sar_pending_run
         st.session_state.sar_pending_run = None
 
-        with st.spinner(f"Fetching Sentinel-1 images for {p['region']}..."):
-            img1, count1, bbox1 = gee_sar.fetch_sar_image(p["bbox"], p["date1"], gee_available)
-            img2, count2, bbox2 = gee_sar.fetch_sar_image(p["bbox"], p["date2"], gee_available)
+        try:
+            with st.spinner(f"Fetching Sentinel-1 images for {p['region']}..."):
+                img1, count1, bbox1 = gee_sar.fetch_sar_image(p["bbox"], p["date1"], gee_available)
+                img2, count2, bbox2 = gee_sar.fetch_sar_image(p["bbox"], p["date2"], gee_available)
 
-        # Use the padded bbox for all downstream calls.
-        # fetch_sar_image expands point geocodes (e.g. "Port of Rotterdam") to
-        # MIN_BBOX_DEG so the SAR image covers a usable area.
-        eff_bbox = bbox1 if bbox1 else bbox2
+            # Use the padded bbox for all downstream calls.
+            # fetch_sar_image expands point geocodes (e.g. "Port of Rotterdam") to
+            # MIN_BBOX_DEG so the SAR image covers a usable area.
+            eff_bbox = bbox1 if bbox1 else bbox2
 
-        if img1 is None or img2 is None:
-            st.error(
-                f"No Sentinel-1 images found near the selected dates for this location. "
-                f"Try dates that are further apart, or a different location. "
-                f"(Date 1: {count1} scenes found, Date 2: {count2} scenes found)"
-            )
-        else:
-            with st.spinner("Computing backscatter statistics..."):
-                stats1 = gee_sar.get_backscatter_stats(img1, eff_bbox)
-                stats2 = gee_sar.get_backscatter_stats(img2, eff_bbox)
-
-            with st.spinner("Building interactive SAR map (this takes 20-40 seconds)..."):
-                sar_map = gee_sar.build_sar_map(img1, img2, eff_bbox, p["date1"], p["date2"])
-
-            st.session_state.sar_maps          = sar_map
-            st.session_state.sar_stats1        = stats1
-            st.session_state.sar_stats2        = stats2
-            st.session_state.sar_result_region = p["region"]
-            st.session_state.sar_result_date1  = p["date1"]
-            st.session_state.sar_result_date2  = p["date2"]
-            st.session_state.sar_result_bbox   = eff_bbox
-            st.session_state.sar_ai_result     = None
-            st.session_state.sar_ai_model      = None
-            with st.spinner("Fetching SAR thumbnails for export..."):
-                st.session_state.sar_thumbs = gee_sar.get_sar_thumbnails(
-                    img1, img2, eff_bbox, p["date1"], p["date2"]
+            if count1 == -1 or count2 == -1:
+                st.error(
+                    "The Earth Engine query failed (a temporary connection, "
+                    "authentication, or quota issue). This is not the same as "
+                    "\"no coverage\" — try again in a moment."
                 )
-            st.success(
-                f"Analysis complete — {p['date1']} and {p['date2']} over {p['region']}."
-            )
+            elif img1 is None or img2 is None:
+                st.error(
+                    f"No Sentinel-1 images found near the selected dates for this location. "
+                    f"Try dates that are further apart, or a different location. "
+                    f"(Date 1: {count1} scenes found, Date 2: {count2} scenes found)"
+                )
+            else:
+                with st.spinner("Computing backscatter statistics..."):
+                    stats1 = gee_sar.get_backscatter_stats(img1, eff_bbox)
+                    stats2 = gee_sar.get_backscatter_stats(img2, eff_bbox)
+
+                if stats1 is None or stats2 is None:
+                    st.error(
+                        "Backscatter statistics could not be computed for one or both "
+                        "dates (no valid pixels in this area, or a temporary Earth "
+                        "Engine error). Try a different date or a larger area."
+                    )
+                else:
+                    with st.spinner("Building interactive SAR map (this takes 20-40 seconds)..."):
+                        sar_map = gee_sar.build_sar_map(img1, img2, eff_bbox, p["date1"], p["date2"])
+
+                    st.session_state.sar_maps          = sar_map
+                    st.session_state.sar_stats1        = stats1
+                    st.session_state.sar_stats2        = stats2
+                    st.session_state.sar_result_region = p["region"]
+                    st.session_state.sar_result_date1  = p["date1"]
+                    st.session_state.sar_result_date2  = p["date2"]
+                    st.session_state.sar_result_bbox   = eff_bbox
+                    st.session_state.sar_ai_result     = None
+                    st.session_state.sar_ai_model      = None
+                    with st.spinner("Fetching SAR thumbnails for export..."):
+                        st.session_state.sar_thumbs = gee_sar.get_sar_thumbnails(
+                            img1, img2, eff_bbox, p["date1"], p["date2"]
+                        )
+                    st.success(
+                        f"Analysis complete — {p['date1']} and {p['date2']} over {p['region']}."
+                    )
+        except Exception as e:
+            st.error(f"SAR Explorer analysis failed: {e}")
 
     # --- Display results ---
     if st.session_state.sar_maps is not None:
@@ -2743,11 +2780,13 @@ in the top-right corner of the map.
             # New location typed — clear any stale map click
             map_picker.clear_click("cd")
             with st.spinner(f"Looking up '{cd_place}'..."):
-                result_bbox = geocoder.geocode_place(cd_place)
+                result_bbox, geocode_warning = geocoder.geocode_place(cd_place)
             if result_bbox:
                 st.session_state.cd_geocoded_place = cd_place.strip()
                 st.session_state.cd_geocoded_bbox  = result_bbox
                 cached_bbox = result_bbox
+                if geocode_warning:
+                    st.info(f"📍 {geocode_warning}")
             else:
                 st.session_state.cd_geocoded_place = ""
                 st.session_state.cd_geocoded_bbox  = None
@@ -2780,6 +2819,7 @@ in the top-right corner of the map.
     # --- Session state ---
     for _k, _v in [
         ("cd_map",           None), ("cd_stats",         None),
+        ("cd_stats_failed",  False),
         ("cd_result_region", None), ("cd_result_date1",  None),
         ("cd_result_date2",  None), ("cd_result_src1",   None),
         ("cd_result_src2",   None), ("cd_ai_result",     None), ("cd_ai_model", None),
@@ -2797,9 +2837,10 @@ in the top-right corner of the map.
         elif cd_date1 >= cd_date2:
             st.error("Date 1 must be before Date 2.")
         else:
-            st.session_state.cd_map        = None
-            st.session_state.cd_stats      = None
-            st.session_state.cd_ai_result  = None
+            st.session_state.cd_map          = None
+            st.session_state.cd_stats        = None
+            st.session_state.cd_stats_failed = False
+            st.session_state.cd_ai_result    = None
             st.session_state.cd_pending_run = {
                 "bbox":   cd_bbox,
                 "date1":  str(cd_date1),
@@ -2812,44 +2853,48 @@ in the top-right corner of the map.
         p = st.session_state.cd_pending_run
         st.session_state.cd_pending_run = None
 
-        with st.spinner(f"Fetching NDVI Date 1 ({p['date1']}) for {p['region']}..."):
-            img1, src1 = gee_change.fetch_ndvi_image(p["bbox"], p["date1"], gee_available)
+        try:
+            with st.spinner(f"Fetching NDVI Date 1 ({p['date1']}) for {p['region']}..."):
+                img1, src1 = gee_change.fetch_ndvi_image(p["bbox"], p["date1"], gee_available)
 
-        with st.spinner(f"Fetching NDVI Date 2 ({p['date2']}) for {p['region']}..."):
-            img2, src2 = gee_change.fetch_ndvi_image(p["bbox"], p["date2"], gee_available)
+            with st.spinner(f"Fetching NDVI Date 2 ({p['date2']}) for {p['region']}..."):
+                img2, src2 = gee_change.fetch_ndvi_image(p["bbox"], p["date2"], gee_available)
 
-        if img1 is None or img2 is None:
-            st.error(
-                "Could not retrieve NDVI imagery for one or both dates. "
-                "Try a wider date range, a different location, or check GEE credentials."
-            )
-        else:
-            with st.spinner("Computing change statistics..."):
-                diff_img = img2.subtract(img1).rename("NDVI_diff")
-                stats = gee_change.compute_change_stats(img1, img2, diff_img, p["bbox"], gee_available)
-
-            with st.spinner("Building change map (20-40 seconds)..."):
-                cd_map = gee_change.build_change_map(
-                    img1, img2, p["bbox"], p["date1"], p["date2"], gee_available
+            if img1 is None or img2 is None:
+                st.error(
+                    "Could not retrieve NDVI imagery for one or both dates. "
+                    "Try a wider date range, a different location, or check GEE credentials."
                 )
+            else:
+                with st.spinner("Computing change statistics..."):
+                    diff_img = img2.subtract(img1).rename("NDVI_diff")
+                    stats, stats_failed = gee_change.compute_change_stats(img1, img2, diff_img, p["bbox"], gee_available)
 
-            st.session_state.cd_map          = cd_map
-            st.session_state.cd_stats        = stats
-            st.session_state.cd_result_region = p["region"]
-            st.session_state.cd_result_date1  = p["date1"]
-            st.session_state.cd_result_date2  = p["date2"]
-            st.session_state.cd_result_src1   = src1
-            st.session_state.cd_result_src2   = src2
-            st.session_state.cd_ai_result     = None
-            st.session_state.cd_ai_model      = None
-            with st.spinner("Fetching NDVI thumbnails for export..."):
-                st.session_state.cd_thumbs = gee_change.get_change_thumbnails(
-                    img1, img2, p["bbox"]
+                with st.spinner("Building change map (20-40 seconds)..."):
+                    cd_map = gee_change.build_change_map(
+                        img1, img2, p["bbox"], p["date1"], p["date2"], gee_available
+                    )
+
+                st.session_state.cd_map          = cd_map
+                st.session_state.cd_stats        = stats
+                st.session_state.cd_stats_failed = stats_failed
+                st.session_state.cd_result_region = p["region"]
+                st.session_state.cd_result_date1  = p["date1"]
+                st.session_state.cd_result_date2  = p["date2"]
+                st.session_state.cd_result_src1   = src1
+                st.session_state.cd_result_src2   = src2
+                st.session_state.cd_ai_result     = None
+                st.session_state.cd_ai_model      = None
+                with st.spinner("Fetching NDVI thumbnails for export..."):
+                    st.session_state.cd_thumbs = gee_change.get_change_thumbnails(
+                        img1, img2, p["bbox"]
+                    )
+                st.success(
+                    f"Analysis complete — {p['date1']} and {p['date2']} over {p['region']}. "
+                    f"Date 1 source: {src1}. Date 2 source: {src2}."
                 )
-            st.success(
-                f"Analysis complete — {p['date1']} and {p['date2']} over {p['region']}. "
-                f"Date 1 source: {src1}. Date 2 source: {src2}."
-            )
+        except Exception as e:
+            st.error(f"Change Detection analysis failed: {e}")
 
     # --- Display results ---
     if st.session_state.cd_stats is not None:
@@ -2857,6 +2902,13 @@ in the top-right corner of the map.
         r_reg  = st.session_state.cd_result_region
         r_d1   = st.session_state.cd_result_date1
         r_d2   = st.session_state.cd_result_date2
+
+        if st.session_state.get("cd_stats_failed"):
+            st.warning(
+                "⚠️ Change statistics could not be computed (GEE was unavailable or the "
+                "computation errored) — the numbers below are zero-filled placeholders, "
+                "not a genuine \"no change\" result. Re-run the analysis to get real data."
+            )
 
         def cd_section_break():
             st.markdown(
@@ -3208,11 +3260,13 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
             # New location typed — clear any stale map click
             map_picker.clear_click("ii")
             with st.spinner(f"Looking up '{ii_place}'..."):
-                result_bbox = geocoder.geocode_place(ii_place)
+                result_bbox, geocode_warning = geocoder.geocode_place(ii_place)
             if result_bbox:
                 st.session_state.ii_geocoded_place = ii_place.strip()
                 st.session_state.ii_geocoded_bbox  = result_bbox
                 cached_bbox = result_bbox
+                if geocode_warning:
+                    st.info(f"📍 {geocode_warning}")
             else:
                 st.session_state.ii_geocoded_place = ""
                 st.session_state.ii_geocoded_bbox  = None
@@ -3295,44 +3349,48 @@ then 2 Groq Llama-4 models. Text-only models are excluded — they cannot receiv
         p = st.session_state.ii_pending_run
         st.session_state.ii_pending_run = None
 
-        with st.spinner(f"Searching Planetary Computer for {p['region']} ({p['date_start']} to {p['date_end']})..."):
-            arr, metadata = imagery_interpreter.fetch_chip(p["bbox"], p["date_start"], p["date_end"])
+        try:
+            with st.spinner(f"Searching Planetary Computer for {p['region']} ({p['date_start']} to {p['date_end']})..."):
+                arr, metadata = imagery_interpreter.fetch_chip(p["bbox"], p["date_start"], p["date_end"])
 
-        if arr is None:
-            st.error(
-                f"No Sentinel-2 scene found for {p['region']} between "
-                f"{p['date_start']} and {p['date_end']}. "
-                "Try widening the date range or increasing cloud cover tolerance."
-            )
-        else:
-            st.session_state.ii_image_arr    = arr
-            st.session_state.ii_metadata     = metadata
-            st.session_state.ii_result_region = p["region"]
-            st.session_state.ii_result_date   = p["date_start"]
-
-            # Immediately run vision AI interpretation
-            with st.spinner(f"Asking vision AI to interpret the image of {p['region']}..."):
-                image_bytes = imagery_interpreter.array_to_jpeg_bytes(arr)
-                interpretation, model_used = imagery_interpreter.interpret_image(
-                    image_bytes,
-                    location   = p["region"],
-                    date_str   = metadata["date"],
-                    gemini_key = config.GEMINI_API_KEY,
-                    groq_key   = config.GROQ_API_KEY,
+            if arr is None:
+                reason = (metadata or {}).get("error", "No Sentinel-2 scene found.")
+                st.error(
+                    f"Could not get imagery for {p['region']} between "
+                    f"{p['date_start']} and {p['date_end']}: {reason} "
+                    "Try widening the date range or increasing cloud cover tolerance."
                 )
-
-            if interpretation:
-                st.session_state.ii_ai_result = interpretation
-                st.session_state.ii_ai_model  = model_used
             else:
-                st.session_state.ii_ai_result = imagery_interpreter.get_fallback_interpretation(
-                    p["region"], metadata["date"]
-                )
-                st.session_state.ii_ai_model  = None
+                st.session_state.ii_image_arr    = arr
+                st.session_state.ii_metadata     = metadata
+                st.session_state.ii_result_region = p["region"]
+                st.session_state.ii_result_date   = p["date_start"]
 
-            st.success(
-                f"Scene found: {metadata['date']} — cloud cover {metadata['cloud_cover']:.1f}%"
-            )
+                # Immediately run vision AI interpretation
+                with st.spinner(f"Asking vision AI to interpret the image of {p['region']}..."):
+                    image_bytes = imagery_interpreter.array_to_jpeg_bytes(arr)
+                    interpretation, model_used = imagery_interpreter.interpret_image(
+                        image_bytes,
+                        location   = p["region"],
+                        date_str   = metadata["date"],
+                        gemini_key = config.GEMINI_API_KEY,
+                        groq_key   = config.GROQ_API_KEY,
+                    )
+
+                if interpretation:
+                    st.session_state.ii_ai_result = interpretation
+                    st.session_state.ii_ai_model  = model_used
+                else:
+                    st.session_state.ii_ai_result = imagery_interpreter.get_fallback_interpretation(
+                        p["region"], metadata["date"]
+                    )
+                    st.session_state.ii_ai_model  = None
+
+                st.success(
+                    f"Scene found: {metadata['date']} — cloud cover {metadata['cloud_cover']:.1f}%"
+                )
+        except Exception as e:
+            st.error(f"AI Imagery Interpreter failed: {e}")
 
     # --- Display results ---
     if st.session_state.ii_image_arr is not None:
@@ -3883,11 +3941,13 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
         if em_place.strip() != cached_place:
             map_picker.clear_click("em")
             with st.spinner(f"Looking up '{em_place}'..."):
-                result_bbox = geocoder.geocode_place(em_place)
+                result_bbox, geocode_warning = geocoder.geocode_place(em_place)
             if result_bbox:
                 st.session_state.em_geocoded_place = em_place.strip()
                 st.session_state.em_geocoded_bbox  = result_bbox
                 cached_bbox = result_bbox
+                if geocode_warning:
+                    st.info(f"📍 {geocode_warning}")
             else:
                 st.session_state.em_geocoded_place = ""
                 st.session_state.em_geocoded_bbox  = None
@@ -3954,40 +4014,43 @@ Data is available from 2018 onwards. The effective spatial resolution is approxi
         cfg      = methane_explorer.GAS_CONFIG[p["gas"]]
         band     = cfg["band"]
 
-        with st.spinner(f"Fetching TROPOMI {p['gas']} data for {p['region']}..."):
-            image, actual_date, pass_count = methane_explorer.fetch_tropomi_mosaic(
-                p["gas"], p["bbox"], p["date"]
-            )
-
-        if image is None:
-            st.error(
-                f"No TROPOMI data found for {p['gas']} near {p['date']}. "
-                "Try a different date or a wider search window."
-            )
-        else:
-            with st.spinner("Computing regional statistics..."):
-                mean_val = methane_explorer.get_regional_mean(image, p["bbox"], band)
-
-            with st.spinner("Building emissions map (20-40 seconds)..."):
-                em_map = methane_explorer.build_emissions_map(
-                    image, p["gas"], p["bbox"], actual_date
+        try:
+            with st.spinner(f"Fetching TROPOMI {p['gas']} data for {p['region']}..."):
+                image, actual_date, pass_count = methane_explorer.fetch_tropomi_mosaic(
+                    p["gas"], p["bbox"], p["date"]
                 )
 
-            st.session_state.em_map          = em_map
-            st.session_state.em_mean_val     = mean_val
-            st.session_state.em_actual_date  = actual_date
-            st.session_state.em_pass_count   = pass_count
-            st.session_state.em_result_region = p["region"]
-            st.session_state.em_result_gas    = p["gas"]
-            st.session_state.em_result_bbox   = p["bbox"]
-            # Fetch static concentration thumbnail for Word export
-            st.session_state.em_result_thumb = methane_explorer.get_concentration_thumb(
-                image, p["gas"], p["bbox"]
-            )
-            st.success(
-                f"Data loaded — {p['gas']} over {p['region']} "
-                f"(7-day window: {actual_date}, {pass_count} orbital passes)."
-            )
+            if image is None:
+                st.error(
+                    f"No TROPOMI data found for {p['gas']} near {p['date']}. "
+                    "Try a different date or a wider search window."
+                )
+            else:
+                with st.spinner("Computing regional statistics..."):
+                    mean_val = methane_explorer.get_regional_mean(image, p["bbox"], band)
+
+                with st.spinner("Building emissions map (20-40 seconds)..."):
+                    em_map = methane_explorer.build_emissions_map(
+                        image, p["gas"], p["bbox"], actual_date
+                    )
+
+                st.session_state.em_map          = em_map
+                st.session_state.em_mean_val     = mean_val
+                st.session_state.em_actual_date  = actual_date
+                st.session_state.em_pass_count   = pass_count
+                st.session_state.em_result_region = p["region"]
+                st.session_state.em_result_gas    = p["gas"]
+                st.session_state.em_result_bbox   = p["bbox"]
+                # Fetch static concentration thumbnail for Word export
+                st.session_state.em_result_thumb = methane_explorer.get_concentration_thumb(
+                    image, p["gas"], p["bbox"]
+                )
+                st.success(
+                    f"Data loaded — {p['gas']} over {p['region']} "
+                    f"(7-day window: {actual_date}, {pass_count} orbital passes)."
+                )
+        except Exception as e:
+            st.error(f"Emissions Explorer analysis failed: {e}")
 
     # --- Display results ---
     if st.session_state.em_map is not None:

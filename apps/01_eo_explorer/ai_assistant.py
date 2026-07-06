@@ -10,6 +10,7 @@ The app never crashes due to a missing or failed API key.
 
 import json
 import time
+import streamlit as st
 import config
 
 # --- Provider chain definition ---
@@ -46,26 +47,42 @@ if config.has_gemini():
         ("gemini", "gemini-flash-latest",      "Gemini Flash Latest"),
     ]
 
-# Session state for chain locking: tracks which index we last succeeded at.
-# Using a mutable dict so the lock persists across function calls in one session.
-_chain_state = {"locked_index": 0}
+# Chain lock: which provider index this user's session last succeeded at.
+# Stored in st.session_state, NOT a module-level variable — a module-level
+# dict is shared by every concurrent visitor on the same Streamlit Cloud
+# process, so one user's rate limit would silently downgrade every other
+# user's tutor answers for the rest of the server's lifetime.
+_LOCK_KEY = "ai_assistant_locked_index"
+
+
+def _get_locked_index() -> int:
+    return st.session_state.get(_LOCK_KEY, 0)
+
+
+def _set_locked_index(i: int) -> None:
+    st.session_state[_LOCK_KEY] = i
 
 
 def get_provider_status() -> str:
     """Return a short string describing which AI mode is active, for display in the sidebar."""
     if not PROVIDER_CHAIN:
         return "Fallback mode (no API keys)"
-    label = PROVIDER_CHAIN[_chain_state["locked_index"]][2]
+    label = PROVIDER_CHAIN[_get_locked_index()][2]
     return f"API ({label})"
 
 
-def ask(question: str, theme: str, dataset: str, location: str, mode: str) -> str:
+def ask(question: str, theme: str, dataset: str, location: str, mode: str) -> tuple:
     """
     Handle a user-submitted question.
     Tries the API chain first. Falls back to local functions if the chain is empty or fails.
+
+    Returns (answer_text, model_label). model_label is None when the answer
+    came from the offline fallback text rather than a live model — callers
+    must show this distinction rather than presenting fallback text as if
+    it were a genuine AI response to the user's specific question.
     """
     if not PROVIDER_CHAIN:
-        return _fallback_for_mode(mode, theme, dataset)
+        return _fallback_for_mode(mode, theme, dataset), None
 
     system_prompt = (
         "You are an Earth Observation tutor, AI strategist, and geospatial advisor. "
@@ -80,14 +97,17 @@ def ask(question: str, theme: str, dataset: str, location: str, mode: str) -> st
         {"role": "user",   "content": question},
     ]
 
-    response = _call_chain(messages)
-    return response if response else _fallback_for_mode(mode, theme, dataset)
+    response, model_label = _call_chain(messages)
+    return (response, model_label) if response else (_fallback_for_mode(mode, theme, dataset), None)
 
 
-def auto_explain(theme: str, dataset: str, location: str, mode: str) -> str:
+def auto_explain(theme: str, dataset: str, location: str, mode: str) -> tuple:
     """
     Generate an automatic explanation based on the active AI mode, without a user question.
     Used to populate the AI panel when the user has not submitted a question yet.
+
+    Returns (answer_text, model_label). model_label is None when the answer
+    came from the offline fallback text rather than a live model.
     """
     prompts = {
         "Explain selected theme":   f"Give a clear, practical explanation of the '{theme}' theme in Earth Observation. Cover what it is, what questions it answers, and one concrete business application. Plain language only.",
@@ -100,7 +120,7 @@ def auto_explain(theme: str, dataset: str, location: str, mode: str) -> str:
     user_msg = prompts.get(mode, f"Explain {theme} and {dataset} briefly.")
 
     if not PROVIDER_CHAIN:
-        return _fallback_for_mode(mode, theme, dataset)
+        return _fallback_for_mode(mode, theme, dataset), None
 
     system_prompt = (
         "You are an Earth Observation tutor and geospatial advisor. "
@@ -113,21 +133,23 @@ def auto_explain(theme: str, dataset: str, location: str, mode: str) -> str:
         {"role": "user",   "content": user_msg},
     ]
 
-    response = _call_chain(messages)
-    return response if response else _fallback_for_mode(mode, theme, dataset)
+    response, model_label = _call_chain(messages)
+    return (response, model_label) if response else (_fallback_for_mode(mode, theme, dataset), None)
 
 
 # --- Internal chain execution ---
 
-def _call_chain(messages: list) -> str:
+def _call_chain(messages: list) -> tuple:
     """
-    Walk the provider chain starting from the locked index.
-    On success, lock to that index and return the response text.
+    Walk the provider chain starting from the locked index (per-session,
+    stored in st.session_state).
+    On success, lock to that index for the rest of this user's session and
+    return (response_text, model_label).
     On retriable error (429, 503, 413, timeout), advance to the next provider.
     On auth error (401, 403), raise immediately — no fallback.
-    Returns empty string if all providers fail.
+    Returns ("", None) if all providers fail.
     """
-    start = _chain_state["locked_index"]
+    start = _get_locked_index()
     for i in range(start, len(PROVIDER_CHAIN)):
         provider, model_id, label = PROVIDER_CHAIN[i]
         try:
@@ -135,16 +157,16 @@ def _call_chain(messages: list) -> str:
                 result = _call_groq(model_id, messages)
             else:
                 result = _call_gemini(model_id, messages)
-            # Success — lock to this index for the remainder of the session
-            _chain_state["locked_index"] = i
-            return result
+            # Success — lock to this index for the remainder of this session
+            _set_locked_index(i)
+            return result, label
         except _AuthError:
             # Auth errors are not retried — surface them immediately
             raise
         except Exception:
             # Any other error (rate limit, timeout, service error) — try next
             continue
-    return ""
+    return "", None
 
 
 def _call_groq(model_id: str, messages: list) -> str:

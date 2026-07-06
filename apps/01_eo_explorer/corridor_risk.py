@@ -235,17 +235,25 @@ def fetch_ndvi_arrays(_bbox):
 
     Cached by bbox so re-running the portal does not re-fetch from GEE.
     _bbox is a tuple so it is hashable by st.cache_data.
-    Returns (ndvi_arrays, labels, error_msg).
+    Returns (ndvi_arrays, labels, error_msg, failed_labels).
+
+    failed_labels lists every time-step whose real composite could not be
+    fetched (GEE error or download failure) and was zero-filled as a
+    placeholder instead. A zero-filled month looks like bare/cleared ground
+    to every downstream algorithm, so the caller must warn the user
+    explicitly whenever this list is non-empty — it must never be silently
+    treated as a normal result.
     """
     ee = _init_gee()
     if ee is None:
-        return None, None, "GEE not available — check credentials in secrets."
+        return None, None, "GEE not available — check credentials in secrets.", []
 
     west, south, east, north = _bbox
     corridor_geom = ee.Geometry.Rectangle([west, south, east, north])
 
-    ndvi_arrays = []
-    labels      = []
+    ndvi_arrays   = []
+    labels        = []
+    failed_labels = []
 
     for start, end, label in TIME_STEPS:
         try:
@@ -253,13 +261,15 @@ def fetch_ndvi_arrays(_bbox):
             arr       = _download_ndvi_array(composite, corridor_geom)
             if arr is None:
                 arr = np.zeros((IMG_H, IMG_W), dtype=np.float32)
+                failed_labels.append(label)
             ndvi_arrays.append(arr)
             labels.append(label)
-        except Exception as e:
+        except Exception:
             ndvi_arrays.append(np.zeros((IMG_H, IMG_W), dtype=np.float32))
             labels.append(label)
+            failed_labels.append(label)
 
-    return ndvi_arrays, labels, None
+    return ndvi_arrays, labels, None, failed_labels
 
 
 # ---------------------------------------------------------------------------
@@ -632,8 +642,8 @@ Algorithm 3 — Linear regression (NDVI slope per pixel, April–September):
   Pixels with positive slope:    {100*(sl>0).mean():.1f}%
   Actively growing (>+0.02/mo):  {100*(sl>0.02).mean():.1f}%
   Rapidly growing (>+0.03/mo):   {100*(sl>0.03).mean():.1f}%
-  Mean slope in dense forest:    {sl[th.flatten()==3].mean():+.4f} NDVI/month
-  Mean slope in shrub zone:      {sl[th.flatten()==2].mean():+.4f} NDVI/month
+  Mean slope in dense forest:    {(float(sl[th.flatten()==3].mean()) if (th.flatten()==3).any() else 0.0):+.4f} NDVI/month
+  Mean slope in shrub zone:      {(float(sl[th.flatten()==2].mean()) if (th.flatten()==2).any() else 0.0):+.4f} NDVI/month
 
 Algorithm 4 — Isolation Forest (6 features: mean, std, slope, min, max, final NDVI):
   Anomalous pixels flagged:       {100*af.mean():.1f}%
@@ -665,15 +675,21 @@ Your output must include three sections:
    | Clear | ... | ... | ... | ... |
    Include the separator row (|---|---|...|) — it is required for the table to render.
 
-2. INSPECTION PRIORITY SCORING — rank the top 3 priority zones by weighted score
-   (change magnitude 35% + proximity to ROW 30% + persistence across methods 20% +
-   confidence 15%). Show the score and reasoning for each.
+2. INSPECTION PRIORITY (minimum 150 words) — using only the Combined Risk Composite
+   percentages and slopes above, rank the four risk categories (Critical, Warning,
+   Monitor, Clear) by how urgently each needs a field visit, and explain why using
+   the numbers given. The data above is a corridor-wide summary per risk category —
+   it does not identify specific zones, coordinates, or locations within the corridor.
+   Do NOT invent named or numbered "priority zones," GPS coordinates, or sub-areas
+   that are not in the data above. If pinpointing exact locations matters, say
+   explicitly that this requires the interactive risk map, not this text brief.
 
-3. FIELD INSPECTION BRIEF — what inspection crews should look for, where to start,
-   and what would confirm or refute the satellite findings.
+3. FIELD INSPECTION BRIEF (minimum 150 words) — what inspection crews should look
+   for, where to start, and what would confirm or refute the satellite findings.
 
-Be specific. Every claim must reference a number from the input data.
-Do not hedge excessively. Make a clear recommendation."""
+Be specific. Every claim must reference a number from the input data above.
+Do not hedge excessively. Make a clear recommendation. Never state a specific
+zone name, sub-area, or coordinate that was not given to you in the data above."""
 
 
 def get_ai_brief(context_str):
@@ -1023,12 +1039,13 @@ produce different risk patterns depending on local conditions.
 
     # --- Session state initialisation ---
     for k, v in [
-        ("cr_ndvi_arrays", None),
-        ("cr_labels",      None),
-        ("cr_results",     None),
-        ("cr_context",     None),
-        ("cr_ai_text",     None),
-        ("cr_ai_model",    None),
+        ("cr_ndvi_arrays",   None),
+        ("cr_labels",        None),
+        ("cr_results",       None),
+        ("cr_context",       None),
+        ("cr_ai_text",       None),
+        ("cr_ai_model",      None),
+        ("cr_failed_labels", []),
     ]:
         if k not in st.session_state:
             st.session_state[k] = v
@@ -1038,11 +1055,12 @@ produce different risk patterns depending on local conditions.
         if not gee_ok:
             st.error("GEE credentials required. Add GEE_SERVICE_ACCOUNT_JSON to Streamlit secrets.")
         else:
-            st.session_state.cr_ndvi_arrays = None
-            st.session_state.cr_results     = None
-            st.session_state.cr_context     = None
-            st.session_state.cr_ai_text     = None
-            st.session_state.cr_pending     = True
+            st.session_state.cr_ndvi_arrays   = None
+            st.session_state.cr_results       = None
+            st.session_state.cr_context       = None
+            st.session_state.cr_ai_text       = None
+            st.session_state.cr_failed_labels = []
+            st.session_state.cr_pending       = True
             st.session_state.cr_pending_key = corridor_key   # capture the selected corridor
             st.rerun()
 
@@ -1055,11 +1073,20 @@ produce different risk patterns depending on local conditions.
         bbox_tuple     = tuple(_selected_corr["bbox"])
 
         with st.spinner("Fetching Sentinel-2 NDVI composites from GEE (6 months — allow 60–90 seconds)..."):
-            ndvi_arrays, labels, err = fetch_ndvi_arrays(bbox_tuple)
+            ndvi_arrays, labels, err, failed_labels = fetch_ndvi_arrays(bbox_tuple)
 
         if err or ndvi_arrays is None:
             st.error(f"GEE fetch failed: {err}")
         else:
+            if failed_labels:
+                st.warning(
+                    f"⚠️ Could not fetch real satellite data for: **{', '.join(failed_labels)}**. "
+                    f"These month(s) were filled with a placeholder (zero NDVI everywhere) so the "
+                    f"analysis could still run — a placeholder month looks like bare/cleared ground "
+                    f"to every algorithm below. Treat any risk finding tied to these months with "
+                    f"caution, and re-run the analysis later to get real data."
+                )
+
             with st.spinner("Running four ML algorithms..."):
                 results = run_algorithms(ndvi_arrays)
 
@@ -1070,12 +1097,13 @@ produce different risk patterns depending on local conditions.
 
             context_str, risk_pcts, risk_slope_means = build_context_string(results)
 
-            st.session_state.cr_ndvi_arrays = ndvi_arrays
-            st.session_state.cr_labels      = labels
-            st.session_state.cr_results     = results
-            st.session_state.cr_context     = context_str
+            st.session_state.cr_ndvi_arrays   = ndvi_arrays
+            st.session_state.cr_labels        = labels
+            st.session_state.cr_results       = results
+            st.session_state.cr_context       = context_str
+            st.session_state.cr_failed_labels = failed_labels
 
-            n_valid = sum(1 for a in ndvi_arrays if a.mean() > 0.01)
+            n_valid = N_STEPS - len(failed_labels)
             st.success(
                 f"Analysis complete — {n_valid}/6 composites with valid data, "
                 f"{results['n_pixels']:,} pixels per time step."
@@ -1344,8 +1372,15 @@ pixels to be anomalous. Increasing this flags more pixels; decreasing it is stri
         section_break()
         st.subheader("🔍 Data Quality")
 
-        n_valid = sum(1 for a in ndvi_arrays if a.mean() > 0.01)
-        conf    = "High" if n_valid == 6 else f"Moderate — only {n_valid}/6 months have valid data"
+        failed_labels = st.session_state.get("cr_failed_labels", [])
+        n_valid       = N_STEPS - len(failed_labels)
+        conf          = "High" if n_valid == 6 else f"Moderate — only {n_valid}/6 months have valid data"
+
+        if failed_labels:
+            st.warning(
+                f"⚠️ {', '.join(failed_labels)} could not be fetched from GEE and were "
+                f"zero-filled as a placeholder — treat findings tied to these months with caution."
+            )
 
         st.info(
             f"**Sensor:** Sentinel-2 Surface Reflectance (COPERNICUS/S2_SR_HARMONIZED)  \n"

@@ -165,9 +165,15 @@ def compute_change_stats(img1, img2, diff_image, bbox, gee_available):
       pct_stable:           stable area as % of total
       threshold:            moderate change threshold used
       extreme_threshold:    extreme change threshold used
+
+    Returns (stats_dict, failed). failed is True when the zeroed dict was
+    substituted because GEE was unavailable or the computation errored — the
+    caller must show this persistently rather than let a transient
+    st.warning scroll away and leave a silent, indistinguishable-from-real
+    all-zero "no change" result in session_state.
     """
     if not gee_available or diff_image is None:
-        return _empty_stats()
+        return _empty_stats(), True
 
     try:
         import ee
@@ -315,11 +321,11 @@ def compute_change_stats(img1, img2, diff_image, bbox, gee_available):
             "pct_stable":            round(pct_stable,         1),
             "threshold":             CHANGE_THRESHOLD,
             "extreme_threshold":     EXTREME_THRESHOLD,
-        }
+        }, False
 
     except Exception as e:
         st.warning(f"Stats computation error: {e}")
-        return _empty_stats()
+        return _empty_stats(), True
 
 
 def _empty_stats():
@@ -527,7 +533,7 @@ def get_change_interpretation(stats, date1, date2, region, src1, src2,
         f"Extreme loss area (<-{EXTREME_THRESHOLD} NDVI): "
         f"{stats['area_extreme_loss_km2']:,.0f} km2\n\n"
         f"Write a detailed analysis covering all four sections below. "
-        f"Each section should be a full paragraph of 4-6 sentences. "
+        f"Each section must be a minimum of 100 words (minimum 400 words total across all four sections). "
         f"Do not compress or summarise — the reader needs depth, not brevity.\n\n"
         f"Section 1 — Pattern: What the numbers show. Describe the net direction "
         f"(greening or browning), the magnitude of change, how the gain and loss areas "

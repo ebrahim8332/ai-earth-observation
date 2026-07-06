@@ -269,6 +269,7 @@ def init_gee():
     try:
         import ee
         if not (hasattr(st, "secrets") and "GEE_SERVICE_ACCOUNT_JSON" in st.secrets):
+            st.session_state["gee_init_error"] = "No GEE_SERVICE_ACCOUNT_JSON found in secrets."
             return False
         creds_dict = json.loads(st.secrets["GEE_SERVICE_ACCOUNT_JSON"])
         credentials = ee.ServiceAccountCredentials(
@@ -277,8 +278,10 @@ def init_gee():
         )
         project = creds_dict.get("project_id", "gen-lang-client-0093165324")
         ee.Initialize(credentials=credentials, project=project)
+        st.session_state.pop("gee_init_error", None)
         return True
-    except Exception:
+    except Exception as e:
+        st.session_state["gee_init_error"] = f"{type(e).__name__}: {e}"
         return False
 
 # ---------------------------------------------------------------------------
@@ -290,7 +293,12 @@ def extract_time_series_gee(bbox, dataset_key, start_year, end_year):
     """Extract a mean time series from GEE for the given bounding box and dataset.
 
     bbox: [west, south, east, north] in decimal degrees
-    Returns a pandas DataFrame with columns: date, value, value_smooth
+    Returns (df, used_sample_fallback). df has columns: date, value, value_smooth.
+    used_sample_fallback is True only when GEE returned no usable records for
+    every date in range and this function silently substituted simulated
+    sample data — the caller must show this to the user (it already has a
+    "Showing sample data" banner keyed off exactly this), not present it as
+    if it were a real extraction.
     """
     import ee
 
@@ -385,11 +393,11 @@ def extract_time_series_gee(bbox, dataset_key, start_year, end_year):
         if not records:
             return generate_sample_data(
                 list(REGIONS.keys())[0], dataset_key, start_year, end_year
-            )
+            ), True
 
         df = pd.DataFrame(records).sort_values("date").reset_index(drop=True)
         df["value_smooth"] = df["value"].rolling(window=3, center=True).mean()
-        return df
+        return df, False
 
     else:
         collection = (
@@ -434,10 +442,18 @@ def extract_time_series_gee(bbox, dataset_key, start_year, end_year):
             value = float(raw)
         records.append({"date": pd.Timestamp(props["date"]), "value": value})
 
+    if not records:
+        # Every image in range returned no valid pixels (e.g. fully masked by
+        # cloud/QA for the whole period). Without this guard, pd.DataFrame([])
+        # has no "date" column and .sort_values("date") raises KeyError.
+        return generate_sample_data(
+            list(REGIONS.keys())[0], dataset_key, start_year, end_year
+        ), True
+
     df = pd.DataFrame(records).sort_values("date").reset_index(drop=True)
     # Rolling 3-period smooth removes noise without distorting the seasonal shape
     df["value_smooth"] = df["value"].rolling(window=3, center=True).mean()
-    return df
+    return df, False
 
 # ---------------------------------------------------------------------------
 # Sample data — fallback when GEE credentials are not configured
@@ -910,7 +926,11 @@ def get_ai_interpretation(stats, dataset_key, region_name, start_year, end_year,
         f"at {stats['slope_per_year']:+.4f} {unit}/year\n"
         f"- Peak month: {stats['peak_month']} ({stats['peak_value']:.3f} {unit})\n"
         f"- Trough month: {stats['trough_month']} ({stats['trough_value']:.3f} {unit})\n"
-        f"- Seasonal amplitude: {stats['amplitude']:.3f} {unit}"
+        f"- Seasonal amplitude: {stats['amplitude']:.3f} {unit}\n"
+        f"\nWhat this dataset measures (use this to ground your explanation, don't guess):\n"
+        f"{dataset['measures']}\n"
+        f"\nKnown limitations of this dataset (reference this for the limitation section):\n"
+        f"{dataset['limitation']}"
     )
 
     prompt_text = (
@@ -926,7 +946,9 @@ def get_ai_interpretation(stats, dataset_key, region_name, start_year, end_year,
             "Interpret satellite data in plain language. "
             "Be specific and direct. Avoid jargon. "
             "Cover: what the data shows, why the pattern exists, "
-            "one practical application, and one limitation.\n\n"
+            "one practical application, and one limitation. "
+            "Write at least 200 words total, with a substantive paragraph "
+            "(minimum 40 words) for each of the four points.\n\n"
             + prompt_text
         )
         text, model = ai_chain.complete(full_prompt, groq_key=groq_key, gemini_key=gemini_key)

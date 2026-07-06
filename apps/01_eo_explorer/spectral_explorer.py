@@ -995,10 +995,14 @@ def build_spectral_signature_chart(sig: dict, satellite_key: str) -> go.Figure:
 
 def get_scene_interpretation(contact_results: list, index_stats: dict,
                               satellite_key: str, location_name: str,
-                              scene_date: str, scene_cloud: float) -> tuple:
+                              scene_date: str, scene_cloud: float,
+                              coverage_pct: float = None) -> tuple:
     """Generate an integrated AI interpretation of the full contact sheet results.
 
     Takes all rendered combinations + index stats as input.
+    coverage_pct is the scene's valid-pixel coverage (from find_best_scene) —
+    without it, the AI can describe "the dominant character of the area"
+    without knowing part of the tile might be nodata/blank.
     Returns (text, model_name).
     """
     # Summarise what each combination showed
@@ -1014,12 +1018,20 @@ def get_scene_interpretation(contact_results: list, index_stats: dict,
                 f"- {idx}: {stats['value']:+.3f} ({stats.get('interpretation', '')})"
             )
 
+    coverage_line = (
+        f"Valid-pixel coverage: {coverage_pct:.0f}% of the tile (the remainder is nodata/blank — "
+        f"factor this into how confidently you describe the whole area)."
+        if coverage_pct is not None
+        else "Valid-pixel coverage: not measured for this scene."
+    )
+
     prompt = f"""You are an Earth Observation analyst interpreting a multi-spectral satellite scene.
 
 Satellite: {satellite_key}
 Location: {location_name}
 Scene date: {scene_date}
 Cloud cover: {scene_cloud:.1f}%
+{coverage_line}
 
 Band combinations rendered:
 {chr(10).join(combo_summary)}
@@ -1028,12 +1040,14 @@ Spectral index statistics (5th-95th percentile range):
 {chr(10).join(idx_summary) if idx_summary else "No index stats available."}
 
 Write a detailed integrated analysis covering all four sections below. \
-Each section should be a full paragraph of 4-6 sentences. \
+Each section must be a minimum of 100 words (minimum 400 words total across all four sections). \
 Do not compress — the reader needs depth, not brevity.
 
 **Section 1 — Landscape Character:** Describe what this scene reveals about the landscape \
 based on all the band combinations together. What land cover types are present? \
-What is the dominant character of the area? What stands out across multiple views?
+What is the dominant character of the area? What stands out across multiple views? \
+If valid-pixel coverage is well under 100%, say so explicitly and qualify how much of \
+the description applies to the whole area versus just the valid portion.
 
 **Section 2 — Spectral Signals:** Interpret the index statistics. What do the NDVI, NDWI, \
 and other index values tell us about vegetation health, water presence, soil exposure, \
@@ -1264,10 +1278,13 @@ def build_timeline(items: list, cloud_field: str | None,
 
 def explain_combination(r_band: str, g_band: str, b_band: str,
                          satellite_key: str, location_name: str,
-                         is_index: bool = False, index_name: str = "") -> str:
+                         is_index: bool = False, index_name: str = "") -> tuple:
     """
     Generate an AI explanation of what the selected band combination reveals
     for the given location. Uses the same fallback chain as the rest of the app.
+
+    Returns (explanation_text, model_label). model_label is None when the
+    text came from the offline fallback rather than a live model.
     """
     sat   = satellite_catalog.SATELLITES[satellite_key]
     bands = sat["bands"]

@@ -314,7 +314,14 @@ def _build_segmentation_fig(rgb, thermal, H, W) -> tuple[bytes, list]:
     return _fig_to_bytes(fig), flagged
 
 
-def _build_ndvi_exg_fig(R, G, B, NIR, NDVI, ExG, VH, VW, PIXEL_M) -> bytes:
+def _build_ndvi_exg_fig(R, G, B, NIR, NDVI, ExG, VH, VW, PIXEL_M) -> tuple:
+    """Returns (figure_bytes, mean_canopy_density_pct).
+
+    mean_canopy_density_pct is the corridor-wide mean of the per-cell canopy
+    density grid shown in the bottom-right panel — computed here so it can
+    also be passed to the Layer 3 prompt instead of being visible only in
+    this chart.
+    """
     NDVI_THRESH = 0.45
     GRID_PX = 10
     n_rows_grid = VH // GRID_PX
@@ -324,6 +331,8 @@ def _build_ndvi_exg_fig(R, G, B, NIR, NDVI, ExG, VH, VW, PIXEL_M) -> bytes:
         for gc in range(n_cols_grid):
             cell = NDVI[gr*GRID_PX:(gr+1)*GRID_PX, gc*GRID_PX:(gc+1)*GRID_PX]
             canopy_density[gr, gc] = float((cell > NDVI_THRESH).mean())
+
+    mean_canopy_density_pct = round(float(canopy_density.mean()) * 100, 1)
 
     rgb_drone = np.stack([R, G, B], axis=-1)
     fig, axes = plt.subplots(2, 2, figsize=(15, 9))
@@ -360,7 +369,7 @@ def _build_ndvi_exg_fig(R, G, B, NIR, NDVI, ExG, VH, VW, PIXEL_M) -> bytes:
                  "Catawba Valley Corridor — Simulated 10 cm/pixel",
                  fontsize=11, fontweight='bold')
     plt.tight_layout()
-    return _fig_to_bytes(fig)
+    return _fig_to_bytes(fig), mean_canopy_density_pct
 
 
 def _build_watershed_fig(NDVI, VH, VW, PIXEL_M) -> tuple[bytes, list, list, int]:
@@ -566,9 +575,13 @@ def _build_comparison_fig(n_drone_crowns, n_encroaching, PIXEL_M, VH, VW) -> tup
 # AI brief builders
 # ---------------------------------------------------------------------------
 
-def _inspection_prompt(zone_stats: dict, flagged_segs: list) -> str:
-    lines = [f"{n}: {s['mean_C']}°C (delta-T {s['delta_T']}°C) — {s['class']}"
-             for n, s in zone_stats.items()]
+def _inspection_prompt(zone_stats: dict, flagged_segs: list, zone_anomaly: dict = None) -> str:
+    zone_anomaly = zone_anomaly or {}
+    lines = [
+        f"{n}: {s['mean_C']}°C (delta-T {s['delta_T']}°C) — {s['class']} — "
+        f"Isolation Forest anomalous pixels: {zone_anomaly.get(n, 'not computed')}%"
+        for n, s in zone_stats.items()
+    ]
     return f"""You are an Earth observation and thermal inspection analyst producing a structured UAV inspection brief for a utility engineering team.
 
 TOWER: 115 kV transmission tower, Catawba Valley NC corridor. Ambient air temperature: {AMBIENT_TEMP}°C.
@@ -580,6 +593,9 @@ LAYER 2 OUTPUTS (computed from co-registered RGB and thermal rasters):
 Flagged segments (Warning or Critical): {len(flagged_segs)}
 
 Write a structured five-element inspection brief. Use exactly these five headings.
+Each section must be a minimum of 60 words (minimum 300 words total across all five sections),
+except sections that legitimately have nothing to report (e.g. zero Critical findings) —
+in that case state so explicitly in 1-2 sentences rather than padding.
 
 ## 1. Critical Findings
 List every component classified Critical (delta-T > 30°C). State the component name, mean temperature, delta-T, and the specific failure mode most consistent with that thermal signature (e.g. cracked ceramic disc, contaminated surface, loose compression joint). State the required action and urgency for each.
@@ -591,7 +607,7 @@ List every component classified Warning (delta-T 15–30°C). State the componen
 Briefly confirm which components are within normal range and why no action is required.
 
 ## 4. Sensor Capability and Methodology
-Explain what the co-registered thermal + RGB approach provides that a single-sensor inspection cannot. Cover: why delta-T is used instead of absolute temperature, how Isolation Forest detects anomalies without labelled training data, and how SLIC segmentation assigns anomalous pixels to specific components.
+Explain what the co-registered thermal + RGB approach provides that a single-sensor inspection cannot. Cover: why delta-T is used instead of absolute temperature, how Isolation Forest detects anomalies without labelled training data, and how SLIC segmentation assigns anomalous pixels to specific components. Reference the actual per-component anomalous-pixel percentages listed above — do not describe Isolation Forest only in the abstract.
 
 ## 5. Field Verification Requirements
 State clearly what this thermal analysis cannot confirm without field inspection. Cover: internal component condition vs surface temperature, conductor sag under load, and thermal camera resolution limits relative to the RGB camera.
@@ -624,13 +640,34 @@ DATA QUALITY: Component zones: {len(zone_stats)} | Flagged segments: {len(flagge
 Source: simulated data modelled on real UAV inspection datasets"""
 
 
+def _fmt_lidar_stat(lidar_stats: dict, key: str, suffix: str = "", decimals: int = 1) -> str:
+    """Format a numeric value from lidar_stats safely.
+
+    lidar_stats is {} whenever the Arc 5 LiDAR comparison asset file is
+    missing (see _build_comparison_fig). Piping a missing value straight into
+    a numeric format spec, e.g. f"{lidar_stats.get('viol_pct', '—'):.1f}",
+    crashes with ValueError the instant the placeholder string '—' hits
+    ':.1f'. This returns plain text instead, so a missing asset degrades
+    gracefully rather than crashing the whole brief.
+    """
+    value = lidar_stats.get(key)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f"{value:.{decimals}f}{suffix}"
+    return "not available"
+
+
 def _vegetation_prompt(n_crowns, n_encroaching, pred_counts, PIXEL_M, VH, VW,
-                       lidar_stats: dict) -> str:
+                       lidar_stats: dict, canopy_density_pct: float = None) -> str:
     class_names = ['Bare soil', 'Low vegetation', 'Woody shrub', 'Tree canopy']
     n_total = VH * VW
     class_lines = "\n".join(
         f"  {class_names[c]}: {pred_counts[c]:,} px = {pred_counts[c]*PIXEL_M**2:.0f} m²"
         for c in range(4)
+    )
+    canopy_density_line = (
+        f"  Mean canopy density (Layer 1, 1 m² grid): {canopy_density_pct}% of cells above the NDVI threshold"
+        if canopy_density_pct is not None
+        else "  Mean canopy density: not computed for this run"
     )
     return f"""You are an Earth observation and vegetation management analyst producing a structured drone survey brief for a utility corridor management team.
 
@@ -641,25 +678,27 @@ LAYER 2 OUTPUTS — DRONE (watershed segmentation + Random Forest, 10 cm/pixel):
   Survey area: {VH*VW*PIXEL_M**2:.0f} m²
   Watershed crowns detected: {n_crowns}
   Encroaching crowns (within 1 m of clear strip boundary): {n_encroaching}
+{canopy_density_line}
   Random Forest pixel classification:
 {class_lines}
 
 LAYER 2 OUTPUTS — ARC 5 LIDAR (DBSCAN, same corridor, full extent):
   Coverage: {lidar_stats.get('area_m2', 45000):,} m²
   DBSCAN crowns detected: {lidar_stats.get('n_crowns', 102)}
-  Violating crowns: {lidar_stats.get('n_violating', '—')}
-  Violation rate: {lidar_stats.get('viol_pct', '—'):.1f}%
-  Mean tree height: {lidar_stats.get('mean_h', '—'):.1f} m
-  LiDAR crown density: {lidar_stats.get('density', '—'):.1f} per 1,000 m²
-  Drone crown density: {lidar_stats.get('drone_density', '—'):.1f} per 1,000 m²
+  Violating crowns: {lidar_stats.get('n_violating', 'not available')}
+  Violation rate: {_fmt_lidar_stat(lidar_stats, 'viol_pct', '%')}
+  Mean tree height: {_fmt_lidar_stat(lidar_stats, 'mean_h', ' m')}
+  LiDAR crown density: {_fmt_lidar_stat(lidar_stats, 'density', ' per 1,000 m²')}
+  Drone crown density: {_fmt_lidar_stat(lidar_stats, 'drone_density', ' per 1,000 m²')}
 
 Write a structured five-element vegetation management brief. Use exactly these five headings.
+Each section must be a minimum of 60 words (minimum 300 words total across all five sections).
 
 ## 1. Encroachment Status
 State the number of encroaching crowns and their proximity to the clear strip. Assess the immediate vegetation management risk. Reference the drone crown count and the LiDAR violation rate from the same corridor.
 
 ## 2. Land Cover Breakdown
-Interpret the Random Forest classification results. State what each class means for corridor management. Identify which land cover types present a risk and which do not.
+Interpret the Random Forest classification results together with the mean canopy density figure given above. State what each class means for corridor management. Identify which land cover types present a risk and which do not.
 
 ## 3. Drone vs LiDAR Comparison
 Explain where the two methods agree and where they diverge. Specifically address why the drone finds higher crown density than LiDAR DBSCAN (different algorithms, not different trees). State what each method measures that the other cannot — height from LiDAR, spectral class and crown texture from drone.
@@ -684,13 +723,13 @@ both sides of the clear strip, with bare soil confined to the cleared zone.
 ## Comparison with Arc 5 LiDAR
 LiDAR DBSCAN found {lidar_stats.get('n_crowns', 102)} crowns in the full \
 {lidar_stats.get('area_m2', 45000):,} m² corridor \
-(density: {lidar_stats.get('density', '—'):.1f} per 1,000 m²). Drone watershed found \
-{lidar_stats.get('drone_density', '—'):.1f} per 1,000 m². The higher drone density is expected — \
+(density: {_fmt_lidar_stat(lidar_stats, 'density', ' per 1,000 m²')}). Drone watershed found \
+{_fmt_lidar_stat(lidar_stats, 'drone_density', ' per 1,000 m²')}. The higher drone density is expected — \
 watershed separates touching crowns at 10 cm resolution that DBSCAN merges in 3D point density space.
 
 ## Where They Agree
 Both methods confirm the same pattern: dense canopy on both sides of the clear strip with active \
-encroachment. The LiDAR violation rate ({lidar_stats.get('viol_pct', '—'):.1f}%) is consistent with \
+encroachment. The LiDAR violation rate ({_fmt_lidar_stat(lidar_stats, 'viol_pct', '%')}) is consistent with \
 the drone encroachment count.
 
 ## Where They Diverge
@@ -1217,7 +1256,7 @@ the statistical anomaly. The algorithm (Layer 2) finds; the AI (Layer 3) explain
             if "insp_brief" not in st.session_state:
                 if st.button("Generate AI Inspection Brief", key="gen_insp_brief"):
                     with st.spinner("Calling AI..."):
-                        prompt  = _inspection_prompt(zone_stats, flagged_segs)
+                        prompt  = _inspection_prompt(zone_stats, flagged_segs, zone_anomaly)
                         brief_text, model_used = ai_chain.complete(
                             prompt,
                             groq_key=config.GROQ_API_KEY,
@@ -1288,12 +1327,13 @@ the statistical anomaly. The algorithm (Layer 2) finds; the AI (Layer 3) explain
 
             with st.spinner("Simulating vegetation scene and running algorithms..."):
                 R, G, B, NIR, NDVI, ExG, crown_params, VH, VW, PIXEL_M = _simulate_vegetation_scene()
-                ndvi_bytes      = _build_ndvi_exg_fig(R, G, B, NIR, NDVI, ExG, VH, VW, PIXEL_M)
+                ndvi_bytes, canopy_density_pct = _build_ndvi_exg_fig(R, G, B, NIR, NDVI, ExG, VH, VW, PIXEL_M)
                 ws_bytes, crown_props, encroaching, n_crowns = _build_watershed_fig(NDVI, VH, VW, PIXEL_M)
                 rf_bytes, pred_counts, accuracy = _build_rf_fig(R, G, B, NIR, NDVI, ExG, VH, VW, PIXEL_M, crown_params)
                 comp_bytes, lidar_stats = _build_comparison_fig(n_crowns, len(encroaching), PIXEL_M, VH, VW)
 
             st.session_state["veg_ndvi_bytes"]    = ndvi_bytes
+            st.session_state["veg_canopy_density_pct"] = canopy_density_pct
             st.session_state["veg_ws_bytes"]      = ws_bytes
             st.session_state["veg_rf_bytes"]      = rf_bytes
             st.session_state["veg_comp_bytes"]    = comp_bytes
@@ -1310,6 +1350,7 @@ the statistical anomaly. The algorithm (Layer 2) finds; the AI (Layer 3) explain
 
         if st.session_state.get("veg_done"):
             ndvi_bytes   = st.session_state["veg_ndvi_bytes"]
+            canopy_density_pct = st.session_state["veg_canopy_density_pct"]
             ws_bytes     = st.session_state["veg_ws_bytes"]
             rf_bytes     = st.session_state["veg_rf_bytes"]
             comp_bytes   = st.session_state["veg_comp_bytes"]
@@ -1493,7 +1534,8 @@ The algorithm finds; the AI explains.
                     with st.spinner("Calling AI..."):
                         prompt = _vegetation_prompt(
                             n_crowns, n_encroach, pred_counts,
-                            PIXEL_M, VH, VW, lidar_stats
+                            PIXEL_M, VH, VW, lidar_stats,
+                            canopy_density_pct=canopy_density_pct,
                         )
                         brief_text, model_used = ai_chain.complete(
                             prompt,

@@ -25,6 +25,11 @@ If only GROQ_API_KEY is set, Gemini tiers are skipped.
 If neither key is set, complete() returns (None, None) and the caller
 uses its own substantive fallback text.
 
+Output token ceilings come from config.py (GEMINI_MAX_OUTPUT_TOKENS,
+GROQ_MAX_COMPLETION_TOKENS) — the same values ai_assistant.py's chain uses —
+rather than a hardcoded number here, so there is one place to raise or lower
+the ceiling for the whole portal instead of two independently-drifting ones.
+
 Usage:
     from ai_chain import complete
 
@@ -35,6 +40,8 @@ Usage:
     else:
         st.markdown(fallback_text)
 """
+
+import config
 
 # ---------------------------------------------------------------------------
 # Chain definition — ordered list of (provider, model_name) tuples
@@ -100,15 +107,15 @@ def _call_gemini(prompt, model_name, api_key):
     from google import genai
     from google.genai import types
 
-    client   = genai.Client(api_key=api_key)
-    config   = types.GenerateContentConfig(
+    client     = genai.Client(api_key=api_key)
+    gen_config = types.GenerateContentConfig(
         temperature=0.3,
-        max_output_tokens=4096,
+        max_output_tokens=config.GEMINI_MAX_OUTPUT_TOKENS,
     )
     response = client.models.generate_content(
         model=model_name,
         contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
-        config=config,
+        config=gen_config,
     )
     text = response.text
     if not text or not text.strip():
@@ -127,7 +134,7 @@ def _call_groq(prompt, model_name, api_key):
     response = client.chat.completions.create(
         model=model_name,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=4096,
+        max_tokens=config.GROQ_MAX_COMPLETION_TOKENS,
         temperature=0.3,
     )
     text = response.choices[0].message.content

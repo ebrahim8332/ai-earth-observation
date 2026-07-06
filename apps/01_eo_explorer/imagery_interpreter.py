@@ -45,7 +45,12 @@ _VISION_GEMINI_MODELS = [
 ]
 
 _VISION_GROQ_MODELS = [
-    "qwen/qwen3.6-27b",
+    # qwen/qwen3.6-27b is a TEXT-ONLY model — it cannot receive images and was
+    # wasting a fallback slot on every Groq-only run (rejecting or ignoring
+    # the image, then falling through via the generic except-continue).
+    # llama-4-scout-17b is the actual multimodal model, matching the module
+    # docstring above.
+    "meta-llama/llama-4-scout-17b-16e-instruct",
     "meta-llama/llama-4-maverick-17b-128e-instruct",
 ]
 
@@ -98,7 +103,9 @@ def fetch_chip(bbox: list, date_start: str, date_end: str) -> tuple:
     Returns:
         (image_array, metadata) where image_array is a uint8 numpy H×W×3 array
         and metadata is a dict with keys: date, cloud_cover, scene_id.
-        Returns (None, None) if no usable scene is found.
+        On failure, returns (None, {"error": reason}) — reason distinguishes
+        "no scenes matched this search" from "a fetch/render exception
+        occurred," which used to both collapse into the same (None, None).
     """
     date_range = f"{date_start}/{date_end}"
 
@@ -127,7 +134,7 @@ def fetch_chip(bbox: list, date_start: str, date_end: str) -> tuple:
             )
 
         if not items:
-            return None, None
+            return None, {"error": "No matching Sentinel-2 scenes found for this location and date range."}
 
         # Pick best scene by spatial coverage
         best_item, _, _ = spectral_explorer.find_best_scene(
@@ -144,7 +151,7 @@ def fetch_chip(bbox: list, date_start: str, date_end: str) -> tuple:
         )
 
         if arr is None or arr.max() == 0:
-            return None, None
+            return None, {"error": "A scene was found but the rendered image was blank (no valid pixels in this area)."}
 
         metadata = {
             "date":        best_item.datetime.strftime("%Y-%m-%d"),
@@ -153,8 +160,8 @@ def fetch_chip(bbox: list, date_start: str, date_end: str) -> tuple:
         }
         return arr, metadata
 
-    except Exception:
-        return None, None
+    except Exception as e:
+        return None, {"error": f"{type(e).__name__}: {e}"}
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +272,19 @@ def _call_gemini_vision(
     text = response.text
     if not text or not text.strip():
         raise ValueError(f"Empty response from {model_name}")
+
+    # 2.5-flash-class models spend part of the 4096-token budget on internal
+    # "thinking" tokens before writing the visible answer, so a truncated
+    # response is a real risk here (more so than for a plain-text prompt).
+    # A response cut off mid-answer must not be silently accepted as a clean
+    # success — treat it as a failure so the chain falls through to the next
+    # model instead.
+    finish_reason = None
+    if getattr(response, "candidates", None):
+        finish_reason = getattr(response.candidates[0], "finish_reason", None)
+    if finish_reason is not None and "MAX_TOKENS" in str(finish_reason).upper():
+        raise ValueError(f"{model_name} response was truncated (hit max_output_tokens)")
+
     return text.strip()
 
 

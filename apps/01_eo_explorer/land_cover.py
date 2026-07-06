@@ -344,13 +344,18 @@ def run_kmeans(scene, n_clusters=5):
     cluster_stats = []
     for c in range(n_clusters):
         mask = cluster_labels == c
+        # An empty cluster (possible at higher n_clusters over a small or
+        # spectrally uniform scene) makes .mean() on an empty slice return
+        # NaN, which would otherwise print as literal "+nan" in the UI
+        # caption, the Word doc table, and the AI prompt text.
+        has_pixels = bool(mask.any())
         cluster_stats.append({
             "cluster": c,
             "count":   int(mask.sum()),
             "pct":     float(100.0 * mask.sum() / (h * w)),
-            "ndvi":    float(ndvi_flat[mask].mean()),
-            "ndwi":    float(ndwi_flat[mask].mean()),
-            "ndbi":    float(ndbi_flat[mask].mean()),
+            "ndvi":    float(ndvi_flat[mask].mean()) if has_pixels else 0.0,
+            "ndwi":    float(ndwi_flat[mask].mean()) if has_pixels else 0.0,
+            "ndbi":    float(ndbi_flat[mask].mean()) if has_pixels else 0.0,
         })
 
     # Assign land cover labels based on cluster spectral signature.
@@ -584,13 +589,18 @@ def _legend_html():
 # AI Layer 3: interpretation
 # ---------------------------------------------------------------------------
 
-def get_ai_interpretation(scene, kmeans_result, rf_result):
+def get_ai_interpretation(scene, kmeans_result, rf_result, agree_pct=None):
     """Generate a structured interpretation from the classification results.
 
     Builds a prompt that includes:
     - K-means cluster breakdown with labels
     - Random Forest area breakdown
     - Top 3 features by importance
+    - The actual measured K-means vs Random Forest agreement percentage, and
+      the Random Forest training coverage (labeled_pct) — both are real,
+      already-computed confidence signals; without them the model has to
+      guess at algorithm agreement in the abstract, which can contradict the
+      real measured number shown elsewhere in the UI.
     Returns (text, model_name) tuple.
     """
     km_stats  = kmeans_result["cluster_stats"]
@@ -616,23 +626,32 @@ def get_ai_interpretation(scene, kmeans_result, rf_result):
     top3_idx = np.argsort(imp)[::-1][:3]
     top3     = [f"{names[i]} ({imp[i]:.3f})" for i in top3_idx]
 
+    agree_line = (
+        f"Measured agreement between K-means and Random Forest on this scene: {agree_pct:.1f}% "
+        f"of pixels ({100 - agree_pct:.1f}% disagreement)."
+        if agree_pct is not None
+        else "Measured agreement between K-means and Random Forest: not computed for this run."
+    )
+
     prompt = f"""You are an Earth Observation analyst interpreting a land cover classification
 of a Sentinel-2 satellite scene.
 
 K-means classification (unsupervised, {kmeans_result['n_clusters']} clusters):
 {chr(10).join(km_summary)}
 
-Random Forest classification (weakly supervised):
+Random Forest classification (weakly supervised, trained on {rf_result['labeled_pct']:.1f}% of valid pixels):
 {chr(10).join(rf_summary)}
 
 Top 3 most important spectral features for the Random Forest:
 {', '.join(top3)}
 
+{agree_line}
+
 Scene date: {scene['scene_date']}
 Cloud cover: {scene['scene_cloud']:.1f}%
 
 Write a detailed analysis covering all four sections below. \
-Each section should be a full paragraph of 4-6 sentences. \
+Each section must be a minimum of 100 words (minimum 400 words total across all four sections). \
 Do not compress or summarise — the reader needs depth, not brevity.
 
 **Section 1 — Land Cover Pattern:** Describe the dominant land cover types and what they reveal \
@@ -643,9 +662,11 @@ for this geography, and any notable absences or surprises in the classification.
 Why did those specific signals drive the Random Forest classification? What physical properties \
 of the surface do they capture, and what does that indicate about the land cover composition?
 
-**Section 3 — Algorithm Agreement:** Describe where K-means and Random Forest are likely to \
-agree and where they are likely to diverge. Which land cover classes are spectrally distinct \
-enough that both methods will agree, and which are ambiguous enough to cause disagreement?
+**Section 3 — Algorithm Agreement:** Using the measured agreement percentage given above (not \
+a guess), explain why the two methods agree or disagree at that rate. Which land cover classes \
+are spectrally distinct enough that both methods would agree on them, and which are ambiguous \
+enough to explain most of the measured disagreement? Also note what the Random Forest training \
+coverage (% of pixels labeled) implies about how much to trust its classification.
 
 **Section 4 — Decision Application:** Name one specific stakeholder (government agency, \
 agricultural ministry, infrastructure operator, insurer, or NGO) and describe exactly how \
@@ -982,11 +1003,13 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
         if lc_place.strip() != cached_place:
             map_picker.clear_click("lc")
             with st.spinner(f"Looking up '{lc_place}'..."):
-                result_bbox = geocoder.geocode_place(lc_place)
+                result_bbox, geocode_warning = geocoder.geocode_place(lc_place)
             if result_bbox:
                 st.session_state.lc_geocoded_place = lc_place.strip()
                 st.session_state.lc_geocoded_bbox  = result_bbox
                 cached_bbox = result_bbox
+                if geocode_warning:
+                    st.info(f"📍 {geocode_warning}")
             else:
                 st.error(f"Could not find '{lc_place}'. Try a different name.")
                 cached_bbox = None
@@ -1255,7 +1278,7 @@ It fetches a real Sentinel-2 scene from Planetary Computer and runs two machine 
 
         if st.button("Get AI Interpretation", type="primary", key="lc_ai_btn"):
             with st.spinner("Interpreting classification results..."):
-                text, model = get_ai_interpretation(scene, km_result, rf_result)
+                text, model = get_ai_interpretation(scene, km_result, rf_result, agree_pct=agree_pct)
                 if text:
                     st.session_state.lc_ai       = text
                     st.session_state.lc_ai_model = model

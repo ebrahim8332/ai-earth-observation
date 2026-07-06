@@ -441,6 +441,7 @@ LAYER 2 OUTPUTS (computed from Sentinel-1 SAR and supporting data):
 - SAR backscatter change threshold applied: {r['sar_threshold']:.0f} dB
 
 Write a structured five-element impact brief. Use exactly these five headings.
+Each section must be a minimum of 80 words (minimum 400 words total across all five sections).
 
 ## 1. Flood Extent
 State the total new flood area in km². Distinguish permanent water from new inundation. Use the numbers provided.
@@ -881,6 +882,21 @@ A drop of −3 dB means returned power halved.
 
     results = st.session_state[cache_key]
     r       = results
+
+    if not any([r.get("url_before"), r.get("url_after"), r.get("url_change"), r.get("url_flood")]):
+        st.warning(
+            "⚠️ The SAR/flood map thumbnails could not be fetched from Earth Engine "
+            "(a transient GEE error). The panels below will show as unavailable — "
+            "the numeric statistics and AI brief are unaffected. Re-run the analysis "
+            "to retry the thumbnail fetch."
+        )
+
+    if r.get("avg_cloud") == "unknown":
+        st.caption(
+            "ℹ️ Cloud cover could not be measured for this event's optical scenes "
+            "(no cloud-free scenes in range, or a transient GEE issue) — this affects "
+            "the confidence note only, not the flood extent numbers themselves."
+        )
 
     def section_break():
         st.markdown(
